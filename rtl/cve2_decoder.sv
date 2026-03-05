@@ -123,6 +123,12 @@ module cve2_decoder #(
   opcode_e     opcode;
   opcode_e     opcode_alu;
 
+  logic [2:0] funct3;
+  logic [5:0] funct6;
+
+  assign funct3 = instr[14:12];
+  assign funct6 = instr[31:26];
+
   // To help timing the flops containing the current instruction are replicated to reduce fan-out.
   // instr_alu is used to determine the ALU control logic and associated operand/imm select signals
   // as the ALU is often on the more critical timing paths. instr is used for everything else.

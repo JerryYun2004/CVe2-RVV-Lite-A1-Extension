@@ -172,7 +172,7 @@ module cve2_id_stage #(
                                                         // access to finish before proceeding
   output logic                      perf_wfi_wait_o,
   output logic                      perf_div_wait_o,
-  output logic                      instr_id_done_o
+  output logic                      instr_id_done_o,
   // Vector unit interface (RVV-Lite A.1, minimal)
   output logic        vec_req_valid_o,
   output logic [31:0] vec_req_instr_o,
@@ -183,7 +183,7 @@ module cve2_id_stage #(
   input  logic        vec_done_i,
   input  logic        vec_scalar_we_i,
   input  logic [4:0]  vec_scalar_waddr_i,
-  input  logic [31:0] vec_scalar_wdata_i,
+  input  logic [31:0] vec_scalar_wdata_i
 
 );
 
@@ -231,6 +231,14 @@ module cve2_id_stage #(
 
   logic [31:0] imm_a;       // contains the immediate for operand b
   logic [31:0] imm_b;       // contains the immediate for operand b
+
+    // ----------------------------
+    // RVV-Lite request skid buffer
+    // ----------------------------
+    logic        vec_req_hold_q;
+    logic [31:0] vec_req_instr_q;
+    logic [31:0] vec_req_rs1_q;
+    logic [31:0] vec_req_rs2_q;
 
   // Register file interface
 
@@ -297,6 +305,37 @@ module cve2_id_stage #(
       id_fsm_q <= FIRST_CYCLE;
     end else if (instr_executing) begin
       id_fsm_q <= id_fsm_d;
+    end
+  end
+
+    // Hold one vector request until accepted by vector unit (breaks comb loops)
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      vec_req_hold_q  <= 1'b0;
+      vec_req_instr_q <= 32'd0;
+      vec_req_rs1_q   <= 32'd0;
+      vec_req_rs2_q   <= 32'd0;
+    end else begin
+      // Clear hold once accepted
+      if (vec_req_hold_q && vec_req_ready_i) begin
+        vec_req_hold_q <= 1'b0;
+      end
+
+      // Capture request when we *first see* a vector instruction in FIRST_CYCLE
+      // (only when not already holding one)
+      if (!vec_req_hold_q &&
+          instr_valid_i && instr_first_cycle && vec_insn_dec &&
+          controller_run && !flush_id) begin
+        vec_req_hold_q  <= 1'b1;
+        vec_req_instr_q <= instr_rdata_i;
+        vec_req_rs1_q   <= rf_rdata_a_fwd;
+        vec_req_rs2_q   <= rf_rdata_b_fwd;
+      end
+
+      // If pipeline is flushed, drop any pending request (safe default)
+      if (flush_id) begin
+        vec_req_hold_q <= 1'b0;
+      end
     end
   end
 
@@ -938,8 +977,10 @@ assign rf_waddr_id_o = (vec_scalar_we_i) ? vec_scalar_waddr_i : rf_waddr_dec;
   // Without Writeback Stage always stall the first cycle of a load/store.
   // Then stall until it is complete
   assign stall_mem = instr_valid_i & (lsu_req_dec & (~lsu_resp_valid_i | instr_first_cycle));
-  // Vector unit stall (multi-cycle vector ops)
-  assign stall_vec = (vec_busy_i && !vec_done_i) | (instr_valid_i && instr_first_cycle && vec_insn_dec && !vec_req_ready_i);
+  // Stall while vector unit is busy (multi-cycle op in flight),
+  // or while we are holding a request that has not been accepted yet.
+  assign stall_vec = (vec_busy_i && !vec_done_i) |
+                     (vec_req_hold_q && !vec_req_ready_i);
 
   // Without writeback stage any valid instruction that hasn't seen an error will execute
   assign instr_executing_spec = instr_valid_i & ~instr_fetch_err_i & controller_run;
@@ -962,11 +1003,11 @@ assign rf_waddr_id_o = (vec_scalar_we_i) ? vec_scalar_waddr_i : rf_waddr_dec;
 
   assign instr_id_done_o = instr_done;
 
-  // Vector unit request (pulse on first cycle of a recognized vector instruction)
-  assign vec_req_valid_o = instr_valid_i && instr_first_cycle && vec_insn_dec && controller_run && !stall_id && !flush_id;
-  assign vec_req_instr_o = instr_rdata_i;
-  assign vec_req_rs1_o   = rf_rdata_a_fwd;
-  assign vec_req_rs2_o   = rf_rdata_b_fwd;
+  // Drive the request channel from the registered hold buffer
+  assign vec_req_valid_o = vec_req_hold_q;
+  assign vec_req_instr_o = vec_req_instr_q;
+  assign vec_req_rs1_o   = vec_req_rs1_q;
+  assign vec_req_rs2_o   = vec_req_rs2_q;
 
   // Signal which instructions to count as retired in minstret, all traps along with ebrk and
   // ecall instructions are not counted.

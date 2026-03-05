@@ -197,6 +197,7 @@ module cve2_core import cve2_pkg::*; #(
   logic [31:0] vec_req_rs2;
   logic        vec_busy;
   logic        vec_done;
+  logic        vec_done_comb;
   logic        vec_scalar_we;
   logic [4:0]  vec_scalar_waddr;
   logic [31:0] vec_scalar_wdata;
@@ -265,6 +266,7 @@ module cve2_core import cve2_pkg::*; #(
 
   // stall control
   logic        id_in_ready;
+  logic        id_in_ready_comb;
   logic        ex_valid;
 
   logic        lsu_resp_valid;
@@ -397,6 +399,23 @@ module cve2_core import cve2_pkg::*; #(
     .if_busy_o          (if_busy)
   );
 
+   // --------------------------------------------------------------------------
+    // Break combinational loops:
+    // - id_in_ready_o and instr_valid_clear_o are now registered inside the controller.
+    //   So we can wire id_in_ready directly from ID stage without another flop here.
+    // - vec_done feeds ID-stage stall/complete logic. Keep it registered to avoid
+    //   same-cycle stall feedback through the vector unit.
+    // --------------------------------------------------------------------------
+    assign id_in_ready = id_in_ready_comb;
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+      if (!rst_ni) begin
+        vec_done <= 1'b0;
+      end else begin
+        vec_done <= vec_done_comb;
+      end
+    end
+
   // Core is waiting for the ISide when ID/EX stage is ready for a new instruction but none are
   // available
   assign perf_iside_wait = id_in_ready & ~instr_valid_id;
@@ -435,7 +454,7 @@ module cve2_core import cve2_pkg::*; #(
     // IF and ID control signals
     .instr_first_cycle_id_o(instr_first_cycle_id),
     .instr_valid_clear_o   (instr_valid_clear),
-    .id_in_ready_o         (id_in_ready),
+    .id_in_ready_o         (id_in_ready_comb),
     .instr_req_o           (instr_req_int),
     .pc_set_o              (pc_set),
     .pc_mux_o              (pc_mux_id),
@@ -563,8 +582,8 @@ module cve2_core import cve2_pkg::*; #(
     .vec_req_valid_o      (vec_req_valid),
     .vec_req_ready_i      (vec_req_ready),
     .vec_req_instr_o      (vec_req_instr),
-    .vec_req_rs1_value_o  (vec_req_rs1),
-    .vec_req_rs2_value_o  (vec_req_rs2),
+    .vec_req_rs1_o  (vec_req_rs1),
+    .vec_req_rs2_o  (vec_req_rs2),
 
     // RVV-Lite vector unit completion channel
     .vec_busy_i           (vec_busy),
@@ -646,32 +665,33 @@ module cve2_core import cve2_pkg::*; #(
 
   // RVV-Lite vector unit (minimal subset)
   cve2_vec_unit vec_unit_i (
-    .clk_i (clk_i),
-    .rst_ni(rst_ni),
+    .clk_i   (clk_i),
+    .rst_ni  (rst_ni),
 
-    .start_i     (vec_req_valid),
-    .start_ready_o(vec_req_ready),
-    .instr_i     (vec_req_instr),
-    .rs1_value_i (vec_req_rs1),
-    .rs2_value_i (vec_req_rs2),
+    // Request interface from ID stage
+    .req_valid_i (vec_req_valid),
+    .req_ready_o (vec_req_ready),
+    .req_instr_i (vec_req_instr),
+    .req_rs1_i   (vec_req_rs1),
+    .req_rs2_i   (vec_req_rs2),
 
-    .busy_o      (vec_busy),
-    .done_o      (vec_done),
+    .busy_o (vec_busy),
+    .done_o (vec_done_comb),
 
-    .scalar_we_o   (vec_scalar_we),
-    .scalar_waddr_o(vec_scalar_waddr),
-    .scalar_wdata_o(vec_scalar_wdata),
+    .scalar_we_o    (vec_scalar_we),
+    .scalar_waddr_o (vec_scalar_waddr),
+    .scalar_wdata_o (vec_scalar_wdata),
 
     // Dedicated (arbitrated) data interface
-    .mem_req_o   (vec_data_req),
-    .mem_we_o    (vec_data_we),
-    .mem_addr_o  (vec_data_addr),
-    .mem_wdata_o (vec_data_wdata),
-    .mem_be_o    (vec_data_be),
-    .mem_gnt_i   (vec_data_gnt),
-    .mem_rvalid_i(vec_data_rvalid),
-    .mem_rdata_i (vec_data_rdata),
-    .mem_err_i   (vec_data_err)
+    .data_req_o    (vec_data_req),
+    .data_we_o     (vec_data_we),
+    .data_addr_o   (vec_data_addr),
+    .data_wdata_o  (vec_data_wdata),
+    .data_be_o     (vec_data_be),
+    .data_gnt_i    (vec_data_gnt),
+    .data_rvalid_i (vec_data_rvalid),
+    .data_rdata_i  (vec_data_rdata),
+    .data_err_i    (vec_data_err)
   );
 
   cve2_load_store_unit load_store_unit_i (

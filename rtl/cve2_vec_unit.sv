@@ -89,6 +89,19 @@ module cve2_vec_unit #(
   // ----------------------
   logic [VLEN-1:0] v_mask, v_r1, v_r2;
   logic [REG_AW-1:0] raddr0, raddr1, raddr2;
+  // Read address generation: pure combinational from latched instr/vop
+  // (keep this out of the main always_comb to avoid accidental comb loops)
+  always_comb begin
+    raddr0 = '0; // v0 mask
+    raddr1 = (vop_q == VOP_VSE32) ? vs3[REG_AW-1:0] : vs1[REG_AW-1:0];
+    raddr2 = vs2[REG_AW-1:0];
+  end
+
+  // Temps (declared outside main always_comb to avoid latch warnings)
+  logic        do_elem;
+  logic [31:0] tmp_a, tmp_b, tmp_r;
+  logic [31:0] tmp_avl;
+  logic [10:0] tmp_vtypei;
   logic              v_we;
   logic [REG_AW-1:0] v_waddr;
   logic [VLEN-1:0]   v_wdata;
@@ -298,11 +311,14 @@ module cve2_vec_unit #(
     v_we           = 1'b0;
     v_waddr        = '0;
     v_wdata        = '0;
-
-    // vector reads: v0 for mask, v_r1 and v_r2 vary by op
-    raddr0 = '0;                 // v0
-    raddr1 = vs1[REG_AW-1:0];     // vs1
-    raddr2 = vs2[REG_AW-1:0];     // vs2
+   
+    // temp defaults (avoid latch inference)
+    do_elem     = 1'b0;
+    tmp_a       = 32'd0;
+    tmp_b       = 32'd0;
+    tmp_r       = 32'd0;
+    tmp_avl     = 32'd0;
+    tmp_vtypei  = 11'd0;
 
     // next-state defaults
     state_d    = state_q;
@@ -321,15 +337,6 @@ module cve2_vec_unit #(
       acc_d      = '0;
     end
 
-    // For store, read vs3 as data vector on port1
-    if (vop_q == VOP_VSE32) begin
-      raddr1 = vs3[REG_AW-1:0];
-    end
-
-    // active-element predicate
-    logic do_elem;
-    do_elem = vm ? 1'b1 : mask_bit(idx_q);
-
     unique case (state_q)
       S_IDLE: begin
         if (req_valid_q) begin
@@ -343,34 +350,34 @@ module cve2_vec_unit #(
             // minimal vset semantics:
             // - accept only fixed SEW/LMUL, TA=1 (for vsetvli)
             // - compute vl = min(AVL, LANES)
-            logic [31:0] avl;
-            logic [10:0] vtypei;
-
-            // default: vsetvli (AVL in rs1)
-            avl   = rs1_q;
-            vtypei = instr_q[30:20];
+            tmp_avl    = 32'd0;
+            tmp_vtypei = 11'd0;
+ 
+            // default: vsetvli
+            tmp_avl    = rs1_q;
+            tmp_vtypei = instr_q[30:20];
 
             if (instr_q[31]) begin
               // vsetivli: AVL is uimm[4:0], vtypei is bits[29:20]
-              avl    = {27'd0, instr_q[19:15]};
-              vtypei = {1'b0, instr_q[29:20]};
+              tmp_avl    = {27'd0, instr_q[19:15]};
+              tmp_vtypei = {1'b0, instr_q[29:20]};
             end else if (instr_q[25] && (instr_q[31:26] == 6'b000000)) begin
               // vsetvl: use rs2 as AVL
-              avl    = rs2_q;
-              vtypei = 11'h000;
+              tmp_avl    = rs2_q;
+              tmp_vtypei = 11'h000;
             end
 
             // vsetvli checks vtype
             if (!instr_q[31] && !(instr_q[25] && (instr_q[31:26] == 6'b000000))) begin
-              if (!vtype_supported(vtypei)) begin
-                // Treat as no-op; decoder should have trapped it as illegal.
-                vl_d = vl_q;
+              if (!vtype_supported(tmp_vtypei)) begin
+                 // Treat as no-op; decoder should have trapped it as illegal.
+                 vl_d = vl_q;
               end else begin
-                vl_d = compute_vl(avl);
+                vl_d = compute_vl(tmp_avl);
               end
             end else begin
               // vsetivli/vsetvl: fixed semantics
-              vl_d = compute_vl(avl);
+              vl_d = compute_vl(tmp_avl);
             end
 
             // write rd with new vl
@@ -378,7 +385,6 @@ module cve2_vec_unit #(
             scalar_waddr_o = rd;
             scalar_wdata_o = {{(32-$clog2(LANES+1)){1'b0}}, vl_d};
 
-            done_o  = 1'b1;
             state_d = S_DONE;
           end
 
@@ -387,44 +393,46 @@ module cve2_vec_unit #(
           VOP_VMUL_VX,
           VOP_VAND_VI,
           VOP_VSRL_VI: begin
-            logic [31:0] a, b, r;
-            a = get_elem32(v_r2, idx_q); // vs2
+            tmp_a = 32'd0;
+            tmp_b = 32'd0;
+            tmp_r = 32'd0;
+
+            tmp_a = get_elem32(v_r2, idx_q);
             unique case (vop_q)
               VOP_VADD_VV: begin
-                b = get_elem32(v_r1, idx_q); // vs1
-                r = a + b;
+                tmp_b = get_elem32(v_r1, idx_q); // vs1
+                tmp_r = tmp_a + tmp_b;
               end
               VOP_VADD_VX: begin
-                b = rs1_q;
-                r = a + b;
+                tmp_b = rs1_q;
+                tmp_r = tmp_a + tmp_b;
               end
               VOP_VMUL_VX: begin
-                b = rs1_q;
-                r = a * b;
+                tmp_b = rs1_q;
+                tmp_r= tmp_a* tmp_b;
               end
               VOP_VAND_VI: begin
-                b = {27'd0, imm5};
-                r = a & b;
+                tmp_b= {27'd0, imm5};
+                tmp_r= tmp_a& tmp_b;
               end
               VOP_VSRL_VI: begin
-                b = {27'd0, imm5};
-                r = a >> b[4:0];
+                tmp_b= {27'd0, imm5};
+                tmp_r= tmp_a>> tmp_b[4:0];
               end
               default: begin
-                b = 32'd0;
-                r = 32'd0;
+                tmp_b= 32'd0;
+                tmp_r= 32'd0;
               end
             endcase
 
             if (do_elem) begin
-              acc_d = set_elem32(acc_d, idx_q, r);
+              acc_d = set_elem32(acc_d, idx_q, tmp_r);
             end
 
             if (idx_q == (vl_q - 1'b1)) begin
               v_we    = 1'b1;
               v_waddr = vd[REG_AW-1:0];
               v_wdata = acc_d;
-              done_o  = 1'b1;
               state_d = S_DONE;
             end else begin
               idx_d = idx_q + 1'b1;
@@ -435,7 +443,6 @@ module cve2_vec_unit #(
           VOP_VSE32: begin
             if (!is_unit_stride()) begin
               // unsupported addressing => should be illegal; treat as done
-              done_o  = 1'b1;
               state_d = S_DONE;
             end else begin
               state_d = S_MEM_REQ;
@@ -443,7 +450,6 @@ module cve2_vec_unit #(
           end
 
           default: begin
-            done_o  = 1'b1;
             state_d = S_DONE;
           end
         endcase
@@ -471,7 +477,6 @@ module cve2_vec_unit #(
         if (data_rvalid_i) begin
           if (data_err_i) begin
             // Minimal: stop. (Scalar core may choose to observe bus error elsewhere.)
-            done_o  = 1'b1;
             state_d = S_DONE;
           end else begin
             if (vop_q == VOP_VLE32) begin
@@ -489,7 +494,6 @@ module cve2_vec_unit #(
                 v_waddr = vd[REG_AW-1:0];
                 v_wdata = acc_d;
               end
-              done_o  = 1'b1;
               state_d = S_DONE;
             end else begin
               idx_d   = idx_q + 1'b1;

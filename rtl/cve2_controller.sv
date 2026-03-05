@@ -127,6 +127,7 @@ module cve2_controller #(
   logic load_err_prio;
 
   logic stall;
+  logic id_in_ready_int;
   logic halt_if;
   logic retain_id;
   logic flush_id;
@@ -402,10 +403,9 @@ module cve2_controller #(
       end
 
       FIRST_FETCH: begin
-        // Stall because of IF miss
-        if (id_in_ready_o) begin
-          ctrl_fsm_ns = DECODE;
-        end
+        // After reset/boot/sleep, just enter decode.
+        // IRQ/debug below can override this.
+        ctrl_fsm_ns = DECODE;
 
         // handle interrupts
         if (handle_irq) begin
@@ -716,17 +716,29 @@ module cve2_controller #(
 
   // If high current instruction cannot complete this cycle. Either because it needs more cycles to
   // finish (stall_id_i)
-  assign stall = stall_id_i;
+    assign stall = stall_id_i;
 
-  // signal to IF stage that ID stage is ready for next instr
-  assign id_in_ready_o = ~stall & ~halt_if & ~retain_id;
+  // --------------------------------------------------------------------------
+  // Break combinational feedback via IF/ID handshake:
+  // register id_in_ready_o and instr_valid_clear_o.
+  // --------------------------------------------------------------------------
+  logic id_in_ready_d;
+  logic instr_valid_clear_d;
 
-  // kill instr in IF-ID pipeline reg that are done, or if a
-  // multicycle instr causes an exception for example
-  // retain_id is another kind of stall, where the instr_valid bit must remain
-  // set (unless flush_id is set also). It cannot be factored directly into
-  // stall as this causes a combinational loop.
-  assign instr_valid_clear_o = ~(stall | retain_id) | flush_id;
+  // combinational "next"
+  assign id_in_ready_d       = ~stall & ~halt_if & ~retain_id;
+  assign instr_valid_clear_d = ~(stall | retain_id) | flush_id;
+
+  // registered outputs
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      id_in_ready_o       <= 1'b0;
+      instr_valid_clear_o <= 1'b1;
+    end else begin
+      id_in_ready_o       <= id_in_ready_d;
+      instr_valid_clear_o <= instr_valid_clear_d;
+    end
+  end
 
   // update registers
   always_ff @(posedge clk_i or negedge rst_ni) begin : update_regs
