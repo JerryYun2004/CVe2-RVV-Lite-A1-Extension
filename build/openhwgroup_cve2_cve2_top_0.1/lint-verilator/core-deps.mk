@@ -108,10 +108,10 @@ fusesoc-deps := \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim/prim_flop.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/build/openhwgroup_cve2_cve2_top_0.1/lint-verilator/generated/lowrisc_prim_flop-impl_0/prim_flop.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/build/openhwgroup_cve2_cve2_top_0.1/lint-verilator/generated/lowrisc_prim_flop-impl_0/prim_flop.sv \
-  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/prim_xilinx_flop.core \
-  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/rtl/prim_xilinx_flop.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_generic/prim_generic_flop.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_generic/rtl/prim_generic_flop.sv \
+  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/prim_xilinx_flop.core \
+  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/rtl/prim_xilinx_flop.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim/prim_clock_mux2.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/build/openhwgroup_cve2_cve2_top_0.1/lint-verilator/generated/lowrisc_prim_clock_mux2-impl_0/prim_clock_mux2.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/build/openhwgroup_cve2_cve2_top_0.1/lint-verilator/generated/lowrisc_prim_clock_mux2-impl_0/prim_clock_mux2.sv \
@@ -124,10 +124,10 @@ fusesoc-deps := \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim/prim_buf.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/build/openhwgroup_cve2_cve2_top_0.1/lint-verilator/generated/lowrisc_prim_buf-impl_0/prim_buf.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/build/openhwgroup_cve2_cve2_top_0.1/lint-verilator/generated/lowrisc_prim_buf-impl_0/prim_buf.sv \
-  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/prim_xilinx_buf.core \
-  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/rtl/prim_xilinx_buf.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_generic/prim_generic_buf.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_generic/rtl/prim_generic_buf.sv \
+  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/prim_xilinx_buf.core \
+  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/vendor/lowrisc_ip/ip/prim_xilinx/rtl/prim_xilinx_buf.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/cve2_clock_gate.core \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_clock_gate.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/cve2_core.core \
@@ -145,6 +145,8 @@ fusesoc-deps := \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_id_stage.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_if_stage.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_load_store_unit.sv \
+  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_vec_unit.sv \
+  /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_vec_regfile.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_multdiv_fast.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_multdiv_slow.sv \
   /Users/jerryyun/RISC-V-RVV-Lite/third_party/cve2_rvv_lite/rtl/cve2_prefetch_buffer.sv \

@@ -51,14 +51,14 @@ VM_USER_LDLIBS = \
 
 # User .cpp files (from .cpp's on Verilator command line)
 VM_USER_CLASSES = \
+  min_tb \
   scramble_model \
   secded_enc \
-  min_tb \
 
 # User .cpp directories (from .cpp's on Verilator command line)
 VM_USER_DIR = \
   . \
-  ../../../../../sim \
+  ../../../../../../../../../../../../../../../sim \
   ../src/lowrisc_dv_scramble_model_0 \
   ../src/lowrisc_dv_secded_enc_0 \
 
@@ -71,11 +71,11 @@ include $(VERILATOR_ROOT)/include/verilated.mk
 ### Executable rules... (from --exe)
 VPATH += $(VM_USER_DIR)
 
+min_tb.o: ../../../../../../sim/min_tb.cpp 
+	$(OBJCACHE) $(CXX) $(CXXFLAGS) $(CPPFLAGS) $(OPT_FAST)  -c -o $@ $<
 scramble_model.o: ../src/lowrisc_dv_scramble_model_0/scramble_model.cc 
 	$(OBJCACHE) $(CXX) $(CXXFLAGS) $(CPPFLAGS) $(OPT_FAST)  -c -o $@ $<
 secded_enc.o: ../src/lowrisc_dv_secded_enc_0/secded_enc.c 
-	$(OBJCACHE) $(CXX) $(CXXFLAGS) $(CPPFLAGS) $(OPT_FAST)  -c -o $@ $<
-min_tb.o: /Users/jerryyun/RISC-V-RVV-Lite/sim/min_tb.cpp 
 	$(OBJCACHE) $(CXX) $(CXXFLAGS) $(CPPFLAGS) $(OPT_FAST)  -c -o $@ $<
 
 ### Link rules... (from --exe)

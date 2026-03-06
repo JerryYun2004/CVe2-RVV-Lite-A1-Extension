@@ -31,6 +31,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top VL_NOT_FINAL : public VerilatedMode
     VL_IN8(&clk_i,0,0);
     VL_IN8(&rst_ni,0,0);
     VL_IN8(&test_en_i,0,0);
+    VL_IN8(&data_rvalid_i,0,0);
+    VL_IN8(&data_err_i,0,0);
     VL_IN8(&irq_software_i,0,0);
     VL_IN8(&irq_timer_i,0,0);
     VL_IN8(&irq_external_i,0,0);
@@ -42,10 +44,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top VL_NOT_FINAL : public VerilatedMode
     VL_IN8(&instr_err_i,0,0);
     VL_OUT8(&data_req_o,0,0);
     VL_IN8(&data_gnt_i,0,0);
-    VL_IN8(&data_rvalid_i,0,0);
     VL_OUT8(&data_we_o,0,0);
     VL_OUT8(&data_be_o,3,0);
-    VL_IN8(&data_err_i,0,0);
     VL_OUT8(&x_issue_valid_o,0,0);
     VL_IN8(&x_issue_ready_i,0,0);
     VL_IN8(&x_issue_resp_i,3,0);

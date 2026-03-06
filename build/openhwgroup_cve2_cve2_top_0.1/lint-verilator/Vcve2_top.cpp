@@ -12,6 +12,8 @@ Vcve2_top::Vcve2_top(VerilatedContext* _vcontextp__, const char* _vcname__)
     , clk_i{vlSymsp->TOP.clk_i}
     , rst_ni{vlSymsp->TOP.rst_ni}
     , test_en_i{vlSymsp->TOP.test_en_i}
+    , data_rvalid_i{vlSymsp->TOP.data_rvalid_i}
+    , data_err_i{vlSymsp->TOP.data_err_i}
     , irq_software_i{vlSymsp->TOP.irq_software_i}
     , irq_timer_i{vlSymsp->TOP.irq_timer_i}
     , irq_external_i{vlSymsp->TOP.irq_external_i}
@@ -23,10 +25,8 @@ Vcve2_top::Vcve2_top(VerilatedContext* _vcontextp__, const char* _vcname__)
     , instr_err_i{vlSymsp->TOP.instr_err_i}
     , data_req_o{vlSymsp->TOP.data_req_o}
     , data_gnt_i{vlSymsp->TOP.data_gnt_i}
-    , data_rvalid_i{vlSymsp->TOP.data_rvalid_i}
     , data_we_o{vlSymsp->TOP.data_we_o}
     , data_be_o{vlSymsp->TOP.data_be_o}
-    , data_err_i{vlSymsp->TOP.data_err_i}
     , x_issue_valid_o{vlSymsp->TOP.x_issue_valid_o}
     , x_issue_ready_i{vlSymsp->TOP.x_issue_ready_i}
     , x_issue_resp_i{vlSymsp->TOP.x_issue_resp_i}

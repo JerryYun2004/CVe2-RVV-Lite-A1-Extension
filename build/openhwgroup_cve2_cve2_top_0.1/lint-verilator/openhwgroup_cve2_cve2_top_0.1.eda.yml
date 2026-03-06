@@ -439,6 +439,12 @@ files:
   name: ../src/openhwgroup_cve2_cve2_core_0.1/rtl/cve2_load_store_unit.sv
 - core: openhwgroup:cve2:cve2_core:0.1
   file_type: systemVerilogSource
+  name: ../src/openhwgroup_cve2_cve2_core_0.1/rtl/cve2_vec_unit.sv
+- core: openhwgroup:cve2:cve2_core:0.1
+  file_type: systemVerilogSource
+  name: ../src/openhwgroup_cve2_cve2_core_0.1/rtl/cve2_vec_regfile.sv
+- core: openhwgroup:cve2:cve2_core:0.1
+  file_type: systemVerilogSource
   name: ../src/openhwgroup_cve2_cve2_core_0.1/rtl/cve2_multdiv_fast.sv
 - core: openhwgroup:cve2:cve2_core:0.1
   file_type: systemVerilogSource

@@ -39,6 +39,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         VL_IN8(clk_i,0,0);
         VL_IN8(rst_ni,0,0);
         VL_IN8(test_en_i,0,0);
+        VL_IN8(data_rvalid_i,0,0);
+        VL_IN8(data_err_i,0,0);
         VL_IN8(irq_software_i,0,0);
         VL_IN8(irq_timer_i,0,0);
         VL_IN8(irq_external_i,0,0);
@@ -50,10 +52,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         VL_IN8(instr_err_i,0,0);
         VL_OUT8(data_req_o,0,0);
         VL_IN8(data_gnt_i,0,0);
-        VL_IN8(data_rvalid_i,0,0);
         VL_OUT8(data_we_o,0,0);
         VL_OUT8(data_be_o,3,0);
-        VL_IN8(data_err_i,0,0);
         VL_OUT8(x_issue_valid_o,0,0);
         VL_IN8(x_issue_ready_i,0,0);
         VL_IN8(x_issue_resp_i,3,0);
@@ -94,26 +94,24 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__lsu_store_err;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__lsu_addr_incr_req;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ctrl_busy;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_req_valid;
+        CData/*4:0*/ cve2_top__DOT__u_cve2_core__DOT__rf_waddr_wb;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_req_ready;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_done;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_done_comb;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__data_req_lsu;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__data_gnt_lsu;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_scalar_we;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_data_req;
     };
     struct {
+        CData/*3:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_data_be;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__data_gnt_lsu;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__data_rvalid_lsu;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__data_err_lsu;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__div_sel_ex;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__csr_access;
-        CData/*1:0*/ cve2_top__DOT__u_cve2_core__DOT__csr_op;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__csr_op_en;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__lsu_req;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_in_ready_comb;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_valid;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__trigger_match;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__perf_load;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__perf_store;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__perf_branch;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__rvfi_intr_d;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__rvfi_intr_q;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__rvfi_set_trap_pc_d;
@@ -162,13 +160,14 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__if_stage_i__DOT__prefetch_buffer_i__DOT__fifo_i__DOT__unaligned_is_compressed;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__if_stage_i__DOT__prefetch_buffer_i__DOT__fifo_i__DOT__addr_incr_two;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__if_stage_i__DOT__prefetch_buffer_i__DOT__fifo_i__DOT____VdfgRegularize_h46d40f9b_0_7;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__lsu_resp_valid_i;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__illegal_insn_dec;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__ebrk_insn;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__dret_insn_dec;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__ecall_insn_dec;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__wfi_insn_dec;
     };
     struct {
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__wfi_insn_dec;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__branch_in_dec;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__branch_set;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__branch_set_raw_d;
@@ -177,9 +176,11 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__jump_in_dec;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__jump_set_dec;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__jump_set;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__instr_executing_spec_q;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__instr_executing_spec;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_run;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__stall_multdiv;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__stall_id;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__vec_req_hold_q;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__rf_wdata_sel;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__rf_we_raw;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__rf_ren_a_dec;
@@ -195,14 +196,11 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*1:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__lsu_type;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__lsu_sign_ext;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__lsu_req_dec;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__csr_pipe_flush;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__id_fsm_q;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__id_fsm_d;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__branch_set_raw_q;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__instr_done_q;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT____VdfgRegularize_hc99b5203_0_3;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT____VdfgRegularize_hc99b5203_0_4;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT____VdfgRegularize_hc99b5203_0_6;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__decoder_i__DOT__mult_en_o;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__decoder_i__DOT__div_en_o;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__decoder_i__DOT__rf_we;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__decoder_i__DOT__vec_insn;
@@ -227,14 +225,15 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__halt_if;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__retain_id;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__flush_id;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__exc_req_lsu;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__special_req;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__do_single_step_d;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__do_single_step_q;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__enter_debug_mode_prio_d;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__enter_debug_mode_prio_q;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__enter_debug_mode;
     };
     struct {
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__enter_debug_mode;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__ebreak_into_debug;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__handle_irq;
         CData/*3:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__mfip_id;
@@ -256,6 +255,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__div_sign_b;
         CData/*4:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__div_counter_q;
         CData/*4:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__div_counter_d;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__mult_hold;
+        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__div_hold;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__div_by_zero_d;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__div_by_zero_q;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__mult_en_internal;
@@ -294,12 +295,13 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__load_store_unit_i__DOT__data_or_pmp_err;
         CData/*2:0*/ cve2_top__DOT__u_cve2_core__DOT__load_store_unit_i__DOT__ls_fsm_cs;
         CData/*2:0*/ cve2_top__DOT__u_cve2_core__DOT__load_store_unit_i__DOT__ls_fsm_ns;
+        CData/*1:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__csr_op_i;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__illegal_csr_insn_o;
         CData/*1:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__priv_lvl_q;
-        CData/*1:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__priv_lvl_d;
-        CData/*5:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mstatus_d;
     };
     struct {
+        CData/*1:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__priv_lvl_d;
+        CData/*5:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mstatus_d;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mstatus_en;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mie_en;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mscratch_en;
@@ -313,8 +315,6 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__dscratch0_en;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__dscratch1_en;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mstack_en;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mcountinhibit_we;
-        CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__csr_we_int;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__csr_wr;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT____VdfgRegularize_h9e2cc0ce_0_0;
         CData/*0:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT____VdfgRegularize_h9e2cc0ce_0_17;
@@ -341,11 +341,20 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         CData/*3:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__compute_vl__12__tmp;
         CData/*3:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__compute_vl__13__Vfuncout;
         CData/*3:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__compute_vl__13__tmp;
+        CData/*0:0*/ __Vtrigprevexpr___TOP__cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__instr_executing_spec__0;
+        CData/*0:0*/ __Vtrigprevexpr___TOP__cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__special_req__0;
+        CData/*0:0*/ __VstlDidInit;
         CData/*0:0*/ __VstlFirstIteration;
+        CData/*0:0*/ __Vtrigprevexpr___TOP__cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__instr_executing_spec__1;
+        CData/*0:0*/ __Vtrigprevexpr___TOP__cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__special_req__1;
+        CData/*0:0*/ __VicoDidInit;
         CData/*0:0*/ __VicoFirstIteration;
+        CData/*0:0*/ __Vtrigprevexpr___TOP__cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__instr_executing_spec__2;
+        CData/*0:0*/ __Vtrigprevexpr___TOP__cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__controller_i__DOT__special_req__2;
         CData/*0:0*/ __Vtrigprevexpr___TOP__clk_i__0;
         CData/*0:0*/ __Vtrigprevexpr___TOP__rst_ni__0;
         CData/*0:0*/ __Vtrigprevexpr___TOP__cve2_top__DOT__clk__0;
+        CData/*0:0*/ __VactDidInit;
         VL_IN16(ram_cfg_i,9,0);
         VL_IN16(irq_fast_i,15,0);
         SData/*15:0*/ cve2_top__DOT__u_cve2_core__DOT__instr_rdata_c_id;
@@ -355,6 +364,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         SData/*10:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__decoder_i__DOT__vec_vtype_supported__0__vtypei;
         SData/*10:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__vtype_supported__11__vtypei;
         VL_IN(hart_id_i,31,0);
+    };
+    struct {
         VL_IN(boot_addr_i,31,0);
         VL_OUT(instr_addr_o,31,0);
         VL_IN(instr_rdata_i,31,0);
@@ -364,8 +375,6 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         VL_IN(dm_halt_addr_i,31,0);
         VL_IN(dm_exception_addr_i,31,0);
         VL_OUT(rvfi_insn,31,0);
-    };
-    struct {
         VL_OUT(rvfi_rs1_rdata,31,0);
         VL_OUT(rvfi_rs2_rdata,31,0);
         VL_OUT(rvfi_rs3_rdata,31,0);
@@ -382,6 +391,9 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__rf_rdata_a;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__rf_rdata_b;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__rf_wdata_wb;
+        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_scalar_wdata;
+        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_data_addr;
+        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_data_wdata;
         IData/*18:0*/ cve2_top__DOT__u_cve2_core__DOT__irqs;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__rvfi_rs1_data_d;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__rvfi_rs1_data_q;
@@ -407,6 +419,9 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         VlWide<3>/*95:0*/ cve2_top__DOT__u_cve2_core__DOT__if_stage_i__DOT__prefetch_buffer_i__DOT__fifo_i__DOT__rdata_q;
         IData/*30:0*/ cve2_top__DOT__u_cve2_core__DOT__if_stage_i__DOT__prefetch_buffer_i__DOT__fifo_i__DOT__instr_addr_d;
         IData/*30:0*/ cve2_top__DOT__u_cve2_core__DOT__if_stage_i__DOT__prefetch_buffer_i__DOT__fifo_i__DOT__instr_addr_q;
+        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__vec_req_instr_q;
+        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__vec_req_rs1_q;
+        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__id_stage_i__DOT__vec_req_rs2_q;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__alu_result;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__alu_i__DOT__operand_a_i;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__op_numerator_q;
@@ -415,6 +430,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__op_quotient_d;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__instr_q;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__rs1_q;
+    };
+    struct {
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__rs2_q;
         VlWide<8>/*255:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__v_r1;
         VlWide<8>/*255:0*/ cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__v_r2;
@@ -430,14 +447,10 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         IData/*30:0*/ cve2_top__DOT__u_cve2_core__DOT__register_file_i__DOT__we_a_dec;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mepc_d;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mtval_d;
-    };
-    struct {
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mtvec_d;
         IData/*18:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mip;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__dcsr_d;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__depc_d;
-        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mhpmcounter_we;
-        IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mhpmcounterh_we;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__csr_wdata_int;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__csr_rdata_int;
         IData/*31:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__u_mepc_csr__DOT__rdata_q;
@@ -483,6 +496,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         IData/*31:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__set_elem32__9__val;
         VlWide<8>/*255:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__set_elem32__9__tmp;
         IData/*31:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__compute_vl__12__avl;
+    };
+    struct {
         IData/*31:0*/ __Vfunc_cve2_top__DOT__u_cve2_core__DOT__vec_unit_i__DOT__compute_vl__13__avl;
         IData/*31:0*/ __VactIterCount;
         VL_OUTW(x_issue_req_o,67,0,3);
@@ -496,8 +511,6 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         QData/*32:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__multdiv_alu_operand_a;
         QData/*33:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__alu_i__DOT__adder_result_ext_o;
         QData/*33:0*/ cve2_top__DOT__u_cve2_core__DOT__ex_block_i__DOT__gen_multdiv_fast__DOT__multdiv_i__DOT__mac_res_d;
-    };
-    struct {
         QData/*63:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mcycle_counter_i__DOT__counter_d;
         QData/*63:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mcycle_counter_i__DOT__counter_q;
         QData/*63:0*/ cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__minstret_counter_i__DOT__counter_d;
@@ -549,6 +562,8 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         VlUnpacked<IData/*31:0*/, 1> cve2_top__DOT__u_cve2_core__DOT__rvfi_stage_mem_wdata;
         VlUnpacked<IData/*18:0*/, 2> cve2_top__DOT__u_cve2_core__DOT__rvfi_ext_stage_mip;
         VlUnpacked<CData/*0:0*/, 2> cve2_top__DOT__u_cve2_core__DOT__rvfi_ext_stage_nmi;
+    };
+    struct {
         VlUnpacked<CData/*0:0*/, 2> cve2_top__DOT__u_cve2_core__DOT__rvfi_ext_stage_debug_req;
         VlUnpacked<QData/*63:0*/, 1> cve2_top__DOT__u_cve2_core__DOT__rvfi_ext_stage_mcycle;
         VlUnpacked<CData/*0:0*/, 1> cve2_top__DOT__u_cve2_core__DOT__rvfi_stage_valid_d;
@@ -559,11 +574,9 @@ class alignas(VL_CACHE_LINE_BYTES) Vcve2_top___024root final {
         VlUnpacked<CData/*7:0*/, 16> cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__pmp_cfg_rdata;
         VlUnpacked<QData/*63:0*/, 32> cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mhpmcounter;
         VlUnpacked<IData/*31:0*/, 32> cve2_top__DOT__u_cve2_core__DOT__cs_registers_i__DOT__mhpmevent;
-        VlUnpacked<QData/*63:0*/, 1> __VstlTriggered;
-        VlUnpacked<QData/*63:0*/, 1> __VicoTriggered;
+        VlUnpacked<QData/*63:0*/, 2> __VstlTriggered;
+        VlUnpacked<QData/*63:0*/, 2> __VicoTriggered;
         VlUnpacked<QData/*63:0*/, 1> __VactTriggered;
-    };
-    struct {
         VlUnpacked<QData/*63:0*/, 1> __VnbaTriggered;
     };
 
