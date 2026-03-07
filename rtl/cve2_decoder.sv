@@ -113,7 +113,8 @@ module cve2_decoder #(
   logic [4:0] instr_rs1;
   logic [4:0] instr_rs2;
   logic [4:0] instr_rs3;
-  logic [4:0] instr_rd;
+  logic [2:0] vec_funct3;
+  logic [5:0] vec_funct6;
 
   logic        use_rs3_d;
   logic        use_rs3_q;
@@ -139,6 +140,8 @@ module cve2_decoder #(
   assign imm_b_type_o = { {19{instr[31]}}, instr[31], instr[7], instr[30:25], instr[11:8], 1'b0 };
   assign imm_u_type_o = { instr[31:12], 12'b0 };
   assign imm_j_type_o = { {12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0 };
+  assign vec_funct3 = instr_rdata_i[14:12];
+  assign vec_funct6 = instr_rdata_i[31:26];
 
   // immediate for CSR manipulation (zero extended)
   assign zimm_rs1_type_o = { 27'b0, instr_rs1 }; // rs1
@@ -1213,7 +1216,7 @@ module cve2_decoder #(
     vec_vtype_ok = 1'b1;
 
     // vset* (OP-V funct3=111). For this project: only SEW=32, LMUL=1, TA=1 are allowed.
-    if (opcode == VEC_OPC_OPV && funct3 == VEC_F3_VSET) begin
+    if (opcode == VEC_OPC_OPV && vec_funct3 == VEC_F3_VSET) begin
       vec_insn = 1'b1;
       vec_vset = 1'b1;
       // vsetvli only (exclude vsetivli and vsetvl patterns) checks vtype.
@@ -1223,12 +1226,12 @@ module cve2_decoder #(
     end
 
     // unit-stride vle32.v / vse32.v only: width=32, nf=0, mew=0, mop=00
-    if (opcode == VEC_OPC_LOADFP && funct3 == VEC_F3_W32) begin
+    if (opcode == VEC_OPC_LOADFP && vec_funct3 == VEC_F3_W32) begin
       if ((instr_rdata_i[31:29] == 3'b000) && (instr_rdata_i[28] == 1'b0) && (instr_rdata_i[27:26] == 2'b00)) begin
         vec_insn = 1'b1;
       end
     end
-    if (opcode == VEC_OPC_STOREFP && funct3 == VEC_F3_W32) begin
+    if (opcode == VEC_OPC_STOREFP && vec_funct3 == VEC_F3_W32) begin
       if ((instr_rdata_i[31:29] == 3'b000) && (instr_rdata_i[28] == 1'b0) && (instr_rdata_i[27:26] == 2'b00)) begin
         vec_insn = 1'b1;
       end
@@ -1236,9 +1239,9 @@ module cve2_decoder #(
 
     // OP-V arithmetic subset
     if (opcode == VEC_OPC_OPV) begin
-      if ((funct3 == VEC_F3_OPIVV) && (funct6 == VEC_F6_VADD)) vec_insn = 1'b1;
-      if ((funct3 == VEC_F3_OPIVX) && ((funct6 == VEC_F6_VADD) || (funct6 == VEC_F6_VMUL))) vec_insn = 1'b1;
-      if ((funct3 == VEC_F3_OPIVI) && ((funct6 == VEC_F6_VAND) || (funct6 == VEC_F6_VSRL))) vec_insn = 1'b1;
+      if ((vec_funct3 == VEC_F3_OPIVV) && (vec_funct6 == VEC_F6_VADD)) vec_insn = 1'b1;
+      if ((vec_funct3 == VEC_F3_OPIVX) && ((vec_funct6 == VEC_F6_VADD) || (vec_funct6 == VEC_F6_VMUL))) vec_insn = 1'b1;
+      if ((vec_funct3 == VEC_F3_OPIVI) && ((vec_funct6 == VEC_F6_VAND) || (vec_funct6 == VEC_F6_VSRL))) vec_insn = 1'b1;
     end
   end
 

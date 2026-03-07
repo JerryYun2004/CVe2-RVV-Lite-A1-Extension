@@ -172,7 +172,7 @@ module cve2_id_stage #(
                                                         // access to finish before proceeding
   output logic                      perf_wfi_wait_o,
   output logic                      perf_div_wait_o,
-  output logic                      instr_id_done_o
+  output logic                      instr_id_done_o,
   // Vector unit interface (RVV-Lite A.1, minimal)
   output logic        vec_req_valid_o,
   output logic [31:0] vec_req_instr_o,
@@ -183,7 +183,7 @@ module cve2_id_stage #(
   input  logic        vec_done_i,
   input  logic        vec_scalar_we_i,
   input  logic [4:0]  vec_scalar_waddr_i,
-  input  logic [31:0] vec_scalar_wdata_i,
+  input  logic [31:0] vec_scalar_wdata_i
 
 );
 

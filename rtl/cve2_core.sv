@@ -563,8 +563,8 @@ module cve2_core import cve2_pkg::*; #(
     .vec_req_valid_o      (vec_req_valid),
     .vec_req_ready_i      (vec_req_ready),
     .vec_req_instr_o      (vec_req_instr),
-    .vec_req_rs1_value_o  (vec_req_rs1),
-    .vec_req_rs2_value_o  (vec_req_rs2),
+    .vec_req_rs1_o        (vec_req_rs1),
+    .vec_req_rs2_o        (vec_req_rs2),
 
     // RVV-Lite vector unit completion channel
     .vec_busy_i           (vec_busy),
@@ -646,32 +646,31 @@ module cve2_core import cve2_pkg::*; #(
 
   // RVV-Lite vector unit (minimal subset)
   cve2_vec_unit vec_unit_i (
-    .clk_i (clk_i),
-    .rst_ni(rst_ni),
+    .clk_i       (clk_i),
+    .rst_ni      (rst_ni),
 
-    .start_i     (vec_req_valid),
-    .start_ready_o(vec_req_ready),
-    .instr_i     (vec_req_instr),
-    .rs1_value_i (vec_req_rs1),
-    .rs2_value_i (vec_req_rs2),
+    .req_valid_i (vec_req_valid),
+    .req_instr_i (vec_req_instr),
+    .req_rs1_i   (vec_req_rs1),
+    .req_rs2_i   (vec_req_rs2),
+    .req_ready_o (vec_req_ready),
 
     .busy_o      (vec_busy),
     .done_o      (vec_done),
 
-    .scalar_we_o   (vec_scalar_we),
-    .scalar_waddr_o(vec_scalar_waddr),
-    .scalar_wdata_o(vec_scalar_wdata),
+    .scalar_we_o    (vec_scalar_we),
+    .scalar_waddr_o (vec_scalar_waddr),
+    .scalar_wdata_o (vec_scalar_wdata),
 
-    // Dedicated (arbitrated) data interface
-    .mem_req_o   (vec_data_req),
-    .mem_we_o    (vec_data_we),
-    .mem_addr_o  (vec_data_addr),
-    .mem_wdata_o (vec_data_wdata),
-    .mem_be_o    (vec_data_be),
-    .mem_gnt_i   (vec_data_gnt),
-    .mem_rvalid_i(vec_data_rvalid),
-    .mem_rdata_i (vec_data_rdata),
-    .mem_err_i   (vec_data_err)
+    .data_req_o    (vec_data_req),
+    .data_gnt_i    (vec_data_gnt),
+    .data_addr_o   (vec_data_addr),
+    .data_we_o     (vec_data_we),
+    .data_be_o     (vec_data_be),
+    .data_wdata_o  (vec_data_wdata),
+    .data_rdata_i  (vec_data_rdata),
+    .data_rvalid_i (vec_data_rvalid),
+    .data_err_i    (vec_data_err)
   );
 
   cve2_load_store_unit load_store_unit_i (

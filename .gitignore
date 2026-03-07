@@ -1,0 +1,21 @@
+# Build artifacts
+obj_dir/
+build/
+*.o
+*.d
+*.log
+*.vcd
+*.fst
+
+# Verilator
+*.cpp
+*.mk
+
+# Editor
+.DS_Store
+.vscode/
+
+# Python
+venv/
+__pycache__/
+*.pyc

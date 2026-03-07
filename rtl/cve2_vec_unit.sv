@@ -236,6 +236,10 @@ module cve2_vec_unit #(
   logic [$clog2(LANES)-1:0]   idx_q, idx_d;          // element index
   logic [31:0]                mem_addr_q, mem_addr_d;
   logic [VLEN-1:0]            acc_q, acc_d;          // dest accumulator
+  logic                       do_elem;
+  logic [31:0]                vset_avl;
+  logic [10:0]                vset_vtypei;
+  logic [31:0]                alu_a, alu_b, alu_r;
 
   // handshake to ID
   assign req_ready_o = ~req_valid_q;
@@ -311,6 +315,12 @@ module cve2_vec_unit #(
     mem_addr_d = mem_addr_q;
     acc_d      = acc_q;
     vop_d      = vop_q;
+    do_elem    = vm ? 1'b1 : mask_bit(idx_q);
+    vset_avl   = 32'd0;
+    vset_vtypei = 11'd0;
+    alu_a      = 32'd0;
+    alu_b      = 32'd0;
+    alu_r      = 32'd0;
 
     // when we just accepted a new request, initialize locals
     if (req_valid_i && req_ready_o) begin
@@ -327,7 +337,6 @@ module cve2_vec_unit #(
     end
 
     // active-element predicate
-    logic do_elem;
     do_elem = vm ? 1'b1 : mask_bit(idx_q);
 
     unique case (state_q)
@@ -343,34 +352,31 @@ module cve2_vec_unit #(
             // minimal vset semantics:
             // - accept only fixed SEW/LMUL, TA=1 (for vsetvli)
             // - compute vl = min(AVL, LANES)
-            logic [31:0] avl;
-            logic [10:0] vtypei;
-
             // default: vsetvli (AVL in rs1)
-            avl   = rs1_q;
-            vtypei = instr_q[30:20];
+            vset_avl    = rs1_q;
+            vset_vtypei = instr_q[30:20];
 
             if (instr_q[31]) begin
               // vsetivli: AVL is uimm[4:0], vtypei is bits[29:20]
-              avl    = {27'd0, instr_q[19:15]};
-              vtypei = {1'b0, instr_q[29:20]};
+              vset_avl    = {27'd0, instr_q[19:15]};
+              vset_vtypei = {1'b0, instr_q[29:20]};
             end else if (instr_q[25] && (instr_q[31:26] == 6'b000000)) begin
               // vsetvl: use rs2 as AVL
-              avl    = rs2_q;
-              vtypei = 11'h000;
+              vset_avl    = rs2_q;
+              vset_vtypei = 11'h000;
             end
 
             // vsetvli checks vtype
             if (!instr_q[31] && !(instr_q[25] && (instr_q[31:26] == 6'b000000))) begin
-              if (!vtype_supported(vtypei)) begin
+              if (!vtype_supported(vset_vtypei)) begin
                 // Treat as no-op; decoder should have trapped it as illegal.
                 vl_d = vl_q;
               end else begin
-                vl_d = compute_vl(avl);
+                vl_d = compute_vl(vset_avl);
               end
             end else begin
               // vsetivli/vsetvl: fixed semantics
-              vl_d = compute_vl(avl);
+              vl_d = compute_vl(vset_avl);
             end
 
             // write rd with new vl
@@ -387,37 +393,36 @@ module cve2_vec_unit #(
           VOP_VMUL_VX,
           VOP_VAND_VI,
           VOP_VSRL_VI: begin
-            logic [31:0] a, b, r;
-            a = get_elem32(v_r2, idx_q); // vs2
+            alu_a = get_elem32(v_r2, idx_q); // vs2
             unique case (vop_q)
               VOP_VADD_VV: begin
-                b = get_elem32(v_r1, idx_q); // vs1
-                r = a + b;
+                alu_b = get_elem32(v_r1, idx_q); // vs1
+                alu_r = alu_a + alu_b;
               end
               VOP_VADD_VX: begin
-                b = rs1_q;
-                r = a + b;
+                alu_b = rs1_q;
+                alu_r = alu_a + alu_b;
               end
               VOP_VMUL_VX: begin
-                b = rs1_q;
-                r = a * b;
+                alu_b = rs1_q;
+                alu_r = alu_a * alu_b;
               end
               VOP_VAND_VI: begin
-                b = {27'd0, imm5};
-                r = a & b;
+                alu_b = {27'd0, imm5};
+                alu_r = alu_a & alu_b;
               end
               VOP_VSRL_VI: begin
-                b = {27'd0, imm5};
-                r = a >> b[4:0];
+                alu_b = {27'd0, imm5};
+                alu_r = alu_a >> alu_b[4:0];
               end
               default: begin
-                b = 32'd0;
-                r = 32'd0;
+                alu_b = 32'd0;
+                alu_r = 32'd0;
               end
             endcase
 
             if (do_elem) begin
-              acc_d = set_elem32(acc_d, idx_q, r);
+              acc_d = set_elem32(acc_d, idx_q, alu_r);
             end
 
             if (idx_q == (vl_q - 1'b1)) begin
