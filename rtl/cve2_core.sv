@@ -197,7 +197,6 @@ module cve2_core import cve2_pkg::*; #(
   logic [31:0] vec_req_rs2;
   logic        vec_busy;
   logic        vec_done;
-  logic        vec_done_comb;
   logic        vec_scalar_we;
   logic [4:0]  vec_scalar_waddr;
   logic [31:0] vec_scalar_wdata;
@@ -266,7 +265,6 @@ module cve2_core import cve2_pkg::*; #(
 
   // stall control
   logic        id_in_ready;
-  logic        id_in_ready_comb;
   logic        ex_valid;
 
   logic        lsu_resp_valid;
@@ -399,23 +397,6 @@ module cve2_core import cve2_pkg::*; #(
     .if_busy_o          (if_busy)
   );
 
-   // --------------------------------------------------------------------------
-    // Break combinational loops:
-    // - id_in_ready_o and instr_valid_clear_o are now registered inside the controller.
-    //   So we can wire id_in_ready directly from ID stage without another flop here.
-    // - vec_done feeds ID-stage stall/complete logic. Keep it registered to avoid
-    //   same-cycle stall feedback through the vector unit.
-    // --------------------------------------------------------------------------
-    assign id_in_ready = id_in_ready_comb;
-
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-      if (!rst_ni) begin
-        vec_done <= 1'b0;
-      end else begin
-        vec_done <= vec_done_comb;
-      end
-    end
-
   // Core is waiting for the ISide when ID/EX stage is ready for a new instruction but none are
   // available
   assign perf_iside_wait = id_in_ready & ~instr_valid_id;
@@ -454,7 +435,6 @@ module cve2_core import cve2_pkg::*; #(
     // IF and ID control signals
     .instr_first_cycle_id_o(instr_first_cycle_id),
     .instr_valid_clear_o   (instr_valid_clear),
-    .id_in_ready_o         (id_in_ready_comb),
     .instr_req_o           (instr_req_int),
     .pc_set_o              (pc_set),
     .pc_mux_o              (pc_mux_id),
@@ -676,7 +656,6 @@ module cve2_core import cve2_pkg::*; #(
     .req_rs2_i   (vec_req_rs2),
 
     .busy_o (vec_busy),
-    .done_o (vec_done_comb),
 
     .scalar_we_o    (vec_scalar_we),
     .scalar_waddr_o (vec_scalar_waddr),
