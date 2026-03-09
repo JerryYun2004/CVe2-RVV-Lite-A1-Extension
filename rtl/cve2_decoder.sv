@@ -113,6 +113,7 @@ module cve2_decoder #(
   logic [4:0] instr_rs1;
   logic [4:0] instr_rs2;
   logic [4:0] instr_rs3;
+  logic [4:0] instr_rd;
   logic [2:0] vec_funct3;
   logic [5:0] vec_funct6;
 
@@ -1240,14 +1241,19 @@ module cve2_decoder #(
     // OP-V arithmetic subset
     if (opcode == VEC_OPC_OPV) begin
       if ((vec_funct3 == VEC_F3_OPIVV) && (vec_funct6 == VEC_F6_VADD)) vec_insn = 1'b1;
-      if ((vec_funct3 == VEC_F3_OPIVX) && ((vec_funct6 == VEC_F6_VADD) || (vec_funct6 == VEC_F6_VMUL))) vec_insn = 1'b1;
+      if ((vec_funct3 == VEC_F3_OPIVX) &&
+          ((vec_funct6 == VEC_F6_VADD) ||
+           (vec_funct6 == VEC_F6_VMUL) ||
+           (vec_funct6 == VEC_F6_VAND))) vec_insn = 1'b1;
       if ((vec_funct3 == VEC_F3_OPIVI) && ((vec_funct6 == VEC_F6_VAND) || (vec_funct6 == VEC_F6_VSRL))) vec_insn = 1'b1;
     end
   end
 
   assign vec_insn_o = vec_insn;
   assign vec_vset_o = vec_vset;
-assign illegal_insn_o = (illegal_insn | illegal_reg_rv32e) | (vec_vset && !vec_vtype_ok);
+  assign illegal_insn_o =
+      (((illegal_insn | illegal_reg_rv32e) & ~vec_insn)) |
+      (vec_vset && !vec_vtype_ok);
 
   // do not propgate regfile write enable if non-available registers are accessed in RV32E
   assign rf_we_o = rf_we & ~illegal_reg_rv32e;
