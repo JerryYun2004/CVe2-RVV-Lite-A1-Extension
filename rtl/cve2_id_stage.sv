@@ -358,18 +358,18 @@ module cve2_id_stage #(
     end
 
     // Temporary debug
-    always_ff @(posedge clk_i) begin
-      if (pc_id_i == 32'h00000104) begin
-        $display("ID DEBUG @ 0x104");
-        $display("instr        = %h", instr_rdata_i);
-        $display("rf_raddr_a_o = %0d", rf_raddr_a_o);
-        $display("rf_raddr_b_o = %0d", rf_raddr_b_o);
-        $display("rf_rdata_a_i = %h", rf_rdata_a_i);
-        $display("rf_rdata_b_i = %h", rf_rdata_b_i);
-        $display("alu_op_a     = %h", alu_operand_a_ex_o);
-        $display("alu_op_b     = %h", alu_operand_b_ex_o);
-      end
-    end
+    // always_ff @(posedge clk_i) begin
+    //   if (pc_id_i == 32'h00000104) begin
+    //     $display("ID DEBUG @ 0x104");
+    //     $display("instr        = %h", instr_rdata_i);
+    //     $display("rf_raddr_a_o = %0d", rf_raddr_a_o);
+    //     $display("rf_raddr_b_o = %0d", rf_raddr_b_o);
+    //     $display("rf_rdata_a_i = %h", rf_rdata_a_i);
+    //     $display("rf_rdata_b_i = %h", rf_rdata_b_i);
+    //     $display("alu_op_a     = %h", alu_operand_a_ex_o);
+    //     $display("alu_op_b     = %h", alu_operand_b_ex_o);
+    //   end
+    // end
 
     assign multicycle_done = vec_insn_dec ? vec_done_i : (lsu_req_dec ? lsu_resp_valid_i : (illegal_insn_dec ? coproc_done : ex_valid_i));
 
@@ -508,13 +508,13 @@ module cve2_id_stage #(
   // Suppress register write if there is an illegal CSR access or instruction is not executing
   logic rf_we_scalar;
   logic vec_scalar_we_safe;
-  always_ff @(posedge clk_i) begin
-    // temporary debug
-    if (vec_scalar_we_i || vec_done_i) begin
-      $display("VEC WB DBG: pc=%h vec_done=%0d vec_we=%0d vec_waddr=%0d vec_wdata=%h instr_exec=%0d",
-              pc_id_i, vec_done_i, vec_scalar_we_i, vec_scalar_waddr_i, vec_scalar_wdata_i, instr_executing);
-    end
-  end
+  // always_ff @(posedge clk_i) begin
+  //   // temporary debug
+  //   if (vec_scalar_we_i || vec_done_i) begin
+  //     $display("VEC WB DBG: pc=%h vec_done=%0d vec_we=%0d vec_waddr=%0d vec_wdata=%h instr_exec=%0d",
+  //             pc_id_i, vec_done_i, vec_scalar_we_i, vec_scalar_waddr_i, vec_scalar_wdata_i, instr_executing);
+  //   end
+  // end
   assign rf_we_scalar      = rf_we_raw & instr_executing & ~illegal_csr_insn_i;
   assign vec_scalar_we_safe = vec_scalar_we_i & vec_done_i;
 
@@ -524,25 +524,25 @@ module cve2_id_stage #(
   assign rf_we_id_o =
       rf_we_scalar | vec_scalar_we_safe;
 
-  always_ff @(posedge clk_i) begin
-    if (rf_we_id_o) begin
-      $display("ID WB DEBUG: pc=%h instr=%h dec=%0d vec=%0d vec_we=%0d final=%0d",
-              pc_id_i,
-              instr_rdata_i,
-              rf_waddr_dec,
-              vec_scalar_waddr_i,
-              vec_scalar_we_i,
-              rf_waddr_id_o);
-    end
-  end
+  // always_ff @(posedge clk_i) begin
+  //   if (rf_we_id_o) begin
+  //     $display("ID WB DEBUG: pc=%h instr=%h dec=%0d vec=%0d vec_we=%0d final=%0d",
+  //             pc_id_i,
+  //             instr_rdata_i,
+  //             rf_waddr_dec,
+  //             vec_scalar_waddr_i,
+  //             vec_scalar_we_i,
+  //             rf_waddr_id_o);
+  //   end
+  // end
 
-  // temporary debug print 
-  always_ff @(posedge clk_i) begin
-    if (rf_we_id_o) begin
-      $display("ID WB DEBUG: instr=%h rf_waddr_dec=%0d rf_waddr_id_o=%0d vec_scalar_we_i=%0d vec_scalar_waddr_i=%0d",
-              instr_rdata_i, rf_waddr_dec, rf_waddr_id_o, vec_scalar_we_i, vec_scalar_waddr_i);
-    end
-  end
+  // // temporary debug print 
+  // always_ff @(posedge clk_i) begin
+  //   if (rf_we_id_o) begin
+  //     $display("ID WB DEBUG: instr=%h rf_waddr_dec=%0d rf_waddr_id_o=%0d vec_scalar_we_i=%0d vec_scalar_waddr_i=%0d",
+  //             instr_rdata_i, rf_waddr_dec, rf_waddr_id_o, vec_scalar_we_i, vec_scalar_waddr_i);
+  //   end
+  // end
 
   // Register file write data mux
   always_comb begin : rf_wdata_id_mux
@@ -856,13 +856,13 @@ module cve2_id_stage #(
       unique case (id_fsm_q)
         FIRST_CYCLE: begin
             // Temporary debug block
-            if (vec_insn_dec || illegal_insn_dec || lsu_req_dec || multdiv_en_dec ||
-                branch_in_dec || jump_in_dec || alu_multicycle_dec) begin
-              $display("CASE DEBUG pc=%08x instr=%08x vec=%0d illegal=%0d lsu=%0d multdiv=%0d branch=%0d jump=%0d alu_multi=%0d",
-                pc_id_i, instr_rdata_i,
-                vec_insn_dec, illegal_insn_dec, lsu_req_dec, multdiv_en_dec,
-                branch_in_dec, jump_in_dec, alu_multicycle_dec);
-            end
+            // if (vec_insn_dec || illegal_insn_dec || lsu_req_dec || multdiv_en_dec ||
+            //     branch_in_dec || jump_in_dec || alu_multicycle_dec) begin
+            //   $display("CASE DEBUG pc=%08x instr=%08x vec=%0d illegal=%0d lsu=%0d multdiv=%0d branch=%0d jump=%0d alu_multi=%0d",
+            //     pc_id_i, instr_rdata_i,
+            //     vec_insn_dec, illegal_insn_dec, lsu_req_dec, multdiv_en_dec,
+            //     branch_in_dec, jump_in_dec, alu_multicycle_dec);
+            // end
 
           unique case (1'b1)
             lsu_req_dec: begin
@@ -1029,12 +1029,12 @@ module cve2_id_stage #(
   assign vec_req_rs2_o   = rf_rdata_b_fwd;
 
   // temp debug
-  always_ff @(posedge clk_i) begin
-    if (instr_valid_i && instr_first_cycle && vec_insn_dec) begin
-      $display("VEC REQ DBG: pc=%h instr=%h vec_req_valid_o=%0d vec_req_ready_i=%0d stall_id=%0d flush_id=%0d",
-              pc_id_i, instr_rdata_i, vec_req_valid_o, vec_req_ready_i, stall_id, flush_id);
-    end
-  end
+  // always_ff @(posedge clk_i) begin
+  //   if (instr_valid_i && instr_first_cycle && vec_insn_dec) begin
+  //     $display("VEC REQ DBG: pc=%h instr=%h vec_req_valid_o=%0d vec_req_ready_i=%0d stall_id=%0d flush_id=%0d",
+  //             pc_id_i, instr_rdata_i, vec_req_valid_o, vec_req_ready_i, stall_id, flush_id);
+  //   end
+  // end
 
   // Signal which instructions to count as retired in minstret, all traps along with ebrk and
   // ecall instructions are not counted.

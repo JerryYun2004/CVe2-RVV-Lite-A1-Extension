@@ -760,19 +760,19 @@ module cve2_core import cve2_pkg::*; #(
   // Debug output      //
   ///////////////////////
 
-  // temporary debug
-  always_ff @(posedge clk_i) begin
-    if (rf_we_wb) begin
-      $display("RF WRITE wb: x%0d <= %h", rf_waddr_wb, rf_wdata_wb);
-    end
-  end
+  // // temporary debug
+  // always_ff @(posedge clk_i) begin
+  //   if (rf_we_wb) begin
+  //     $display("RF WRITE wb: x%0d <= %h", rf_waddr_wb, rf_wdata_wb);
+  //   end
+  // end
 
-  always_ff @(posedge clk_i) begin
-    if (vec_done || vec_scalar_we) begin
-      $display("CORE VEC SIG DBG: vec_done=%0d vec_we=%0d vec_waddr=%0d vec_wdata=%h",
-              vec_done, vec_scalar_we, vec_scalar_waddr, vec_scalar_wdata);
-    end
-  end
+  // always_ff @(posedge clk_i) begin
+  //   if (vec_done || vec_scalar_we) begin
+  //     $display("CORE VEC SIG DBG: vec_done=%0d vec_we=%0d vec_waddr=%0d vec_wdata=%h",
+  //             vec_done, vec_scalar_we, vec_scalar_waddr, vec_scalar_wdata);
+  //   end
+  // end
 
   assign debug_halted_o = debug_mode;
 

@@ -291,11 +291,11 @@ module cve2_vec_unit #(
         req_valid_q <= 1'b0;
       end
       // temp debug
-      if (state_q == S_ALU || state_q == S_DONE || state_d == S_DONE || vop_q == VOP_VSET) begin
-        $display("VEC UNIT DBG: pc=%h state_q=%0d state_d=%0d vop_q=%0d instr_q=%h rd=%0d vl_q=%0d vl_d=%0d done_o=%0d scalar_we_o=%0d scalar_waddr_o=%0d scalar_wdata_o=%h busy_o=%0d",
-                instr_q, state_q, state_d, vop_q, instr_q, rd, vl_q, vl_d,
-                done_o, scalar_we_o, scalar_waddr_o, scalar_wdata_o, busy_o);
-      end
+      // if (state_q == S_ALU || state_q == S_DONE || state_d == S_DONE || vop_q == VOP_VSET) begin
+      //   $display("VEC UNIT DBG: pc=%h state_q=%0d state_d=%0d vop_q=%0d instr_q=%h rd=%0d vl_q=%0d vl_d=%0d done_o=%0d scalar_we_o=%0d scalar_waddr_o=%0d scalar_wdata_o=%h busy_o=%0d",
+      //           instr_q, state_q, state_d, vop_q, instr_q, rd, vl_q, vl_d,
+      //           done_o, scalar_we_o, scalar_waddr_o, scalar_wdata_o, busy_o);
+      // end
     end
   end
 
