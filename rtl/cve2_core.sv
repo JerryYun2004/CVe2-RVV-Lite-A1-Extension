@@ -235,6 +235,29 @@ module cve2_core import cve2_pkg::*; #(
   logic [31:0] alu_adder_result_ex;    // Used to forward computed address to LSU
   logic [31:0] result_ex;
 
+  // Vector -> EX reuse path
+  logic        vec_ex_req;
+  logic        vec_ex_is_mul;
+  logic [1:0]  vec_ex_alu_op;
+  logic [31:0] vec_ex_operand_a;
+  logic [31:0] vec_ex_operand_b;
+  logic [31:0] vec_result_ex;
+  logic        vec_ex_valid;
+
+  // EX input muxes (scalar or vector micro-op)
+  alu_op_e     alu_operator_ex_mux;
+  logic [31:0] alu_operand_a_ex_mux;
+  logic [31:0] alu_operand_b_ex_mux;
+  logic        alu_instr_first_cycle_ex_mux;
+  md_op_e      multdiv_operator_ex_mux;
+  logic        mult_en_ex_mux;
+  logic        div_en_ex_mux;
+  logic        mult_sel_ex_mux;
+  logic        div_sel_ex_mux;
+  logic [1:0]  multdiv_signed_mode_ex_mux;
+  logic [31:0] multdiv_operand_a_ex_mux;
+  logic [31:0] multdiv_operand_b_ex_mux;
+
   // Multiplier Control
   logic        mult_en_ex;
   logic        div_en_ex;
@@ -579,6 +602,99 @@ module cve2_core import cve2_pkg::*; #(
   // for RVFI only
   assign unused_illegal_insn_id = illegal_insn_id;
 
+  // Reuse scalar EX hardware for vector arithmetic/multiply micro-ops.
+  wire sel_vec_ex = vec_ex_req | (vec_busy & vec_ex_is_mul);
+
+  // Temporary Debug Prints
+  always_ff @(posedge clk_i) begin
+    if (vec_ex_req || sel_vec_ex) begin
+      $display("[CORE-SEL] vec_ex_req=%0d vec_busy=%0d vec_ex_is_mul=%0d sel_vec_ex=%0d",
+              vec_ex_req, vec_busy, vec_ex_is_mul, sel_vec_ex);
+    end
+  end
+
+  always_comb begin
+
+    alu_operator_ex_mux          = alu_operator_ex;
+    alu_operand_a_ex_mux         = alu_operand_a_ex;
+    alu_operand_b_ex_mux         = alu_operand_b_ex;
+    alu_instr_first_cycle_ex_mux = instr_first_cycle_id;
+
+    multdiv_operator_ex_mux      = multdiv_operator_ex;
+    mult_en_ex_mux               = mult_en_ex;
+    div_en_ex_mux                = div_en_ex;
+    mult_sel_ex_mux              = mult_sel_ex;
+    div_sel_ex_mux               = div_sel_ex;
+    multdiv_signed_mode_ex_mux   = multdiv_signed_mode_ex;
+    multdiv_operand_a_ex_mux     = multdiv_operand_a_ex;
+    multdiv_operand_b_ex_mux     = multdiv_operand_b_ex;
+
+    if (sel_vec_ex) begin
+      alu_operand_a_ex_mux         = vec_ex_operand_a;
+      alu_operand_b_ex_mux         = vec_ex_operand_b;
+      alu_instr_first_cycle_ex_mux = 1'b1;
+
+      multdiv_operand_a_ex_mux     = vec_ex_operand_a;
+      multdiv_operand_b_ex_mux     = vec_ex_operand_b;
+
+      // Safe defaults for vector EX
+      alu_operator_ex_mux          = ALU_ADD;
+      multdiv_signed_mode_ex_mux   = 2'b00;
+      div_en_ex_mux                = 1'b0;
+      div_sel_ex_mux               = 1'b0;
+
+      if (vec_ex_is_mul) begin
+        // vmul.vx: keep ALU in harmless mode while mult path is selected
+        alu_operator_ex_mux        = ALU_ADD;
+        multdiv_operator_ex_mux    = MD_OP_MULL;
+        mult_en_ex_mux             = 1'b1;
+        mult_sel_ex_mux            = 1'b1;
+      end else begin
+        unique case (vec_ex_alu_op)
+          2'd0: alu_operator_ex_mux = ALU_ADD;
+          2'd1: alu_operator_ex_mux = ALU_AND;
+          2'd2: alu_operator_ex_mux = ALU_SRL;
+          default: alu_operator_ex_mux = ALU_ADD;
+        endcase
+        mult_en_ex_mux             = 1'b0;
+        mult_sel_ex_mux            = 1'b0;
+      end
+    end
+
+
+    // Temporary Debug Prints
+    if (sel_vec_ex) begin
+      $write("[CORE-MUX-COMB] sel_vec_ex=%0d vec_ex_is_mul=%0d vec_ex_alu_op=%0d alu_operator_ex=%0d alu_operator_ex_mux=%0d mult_sel_ex=%0d mult_sel_ex_mux=%0d div_sel_ex=%0d div_sel_ex_mux=%0d\n",
+            sel_vec_ex, vec_ex_is_mul, vec_ex_alu_op,
+            alu_operator_ex, alu_operator_ex_mux,
+            mult_sel_ex, mult_sel_ex_mux,
+            div_sel_ex, div_sel_ex_mux);
+    end
+
+  end
+
+  assign vec_result_ex = result_ex;
+  assign vec_ex_valid  = ex_valid & sel_vec_ex;
+
+  // Temporary Debug Prints
+  always_ff @(posedge clk_i) begin
+    if (sel_vec_ex || vec_ex_valid) begin
+      $display("[CORE-VEX-OP] vec_ex_alu_op=%0d alu_operator_ex_mux=%0d sel_vec_ex=%0d req=%0d is_mul=%0d op_a=%h op_b=%h result_ex=%h ex_valid=%0d vec_ex_valid=%0d",
+               vec_ex_alu_op, alu_operator_ex_mux, sel_vec_ex,
+               vec_ex_req, vec_ex_is_mul,
+               vec_ex_operand_a, vec_ex_operand_b,
+               result_ex, ex_valid, vec_ex_valid);
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+    if (vec_ex_req || vec_ex_valid) begin
+      $display("[CORE-VEX-VALID] req=%0d sel=%0d is_mul=%0d result_ex=%h ex_valid=%0d vec_valid=%0d",
+              vec_ex_req, sel_vec_ex, vec_ex_is_mul,
+              result_ex, ex_valid, vec_ex_valid);
+    end
+  end
+
   cve2_ex_block #(
     .RV32M          (RV32M),
     .RV32B          (RV32B)
@@ -587,20 +703,20 @@ module cve2_core import cve2_pkg::*; #(
     .rst_ni(rst_ni),
 
     // ALU signal from ID stage
-    .alu_operator_i         (alu_operator_ex),
-    .alu_operand_a_i        (alu_operand_a_ex),
-    .alu_operand_b_i        (alu_operand_b_ex),
-    .alu_instr_first_cycle_i(instr_first_cycle_id),
+    .alu_operator_i         (alu_operator_ex_mux),
+    .alu_operand_a_i        (alu_operand_a_ex_mux),
+    .alu_operand_b_i        (alu_operand_b_ex_mux),
+    .alu_instr_first_cycle_i(alu_instr_first_cycle_ex_mux),
 
     // Multipler/Divider signal from ID stage
-    .multdiv_operator_i   (multdiv_operator_ex),
-    .mult_en_i            (mult_en_ex),
-    .div_en_i             (div_en_ex),
-    .mult_sel_i           (mult_sel_ex),
-    .div_sel_i            (div_sel_ex),
-    .multdiv_signed_mode_i(multdiv_signed_mode_ex),
-    .multdiv_operand_a_i  (multdiv_operand_a_ex),
-    .multdiv_operand_b_i  (multdiv_operand_b_ex),
+    .multdiv_operator_i   (multdiv_operator_ex_mux),
+    .mult_en_i            (mult_en_ex_mux),
+    .div_en_i             (div_en_ex_mux),
+    .mult_sel_i           (mult_sel_ex_mux),
+    .div_sel_i            (div_sel_ex_mux),
+    .multdiv_signed_mode_i(multdiv_signed_mode_ex_mux),
+    .multdiv_operand_a_i  (multdiv_operand_a_ex_mux),
+    .multdiv_operand_b_i  (multdiv_operand_b_ex_mux),
 
     // Intermediate value register
     .imd_val_we_o(imd_val_we_ex),
@@ -672,7 +788,15 @@ module cve2_core import cve2_pkg::*; #(
     .data_wdata_o  (vec_data_wdata),
     .data_rdata_i  (vec_data_rdata),
     .data_rvalid_i (vec_data_rvalid),
-    .data_err_i    (vec_data_err)
+    .data_err_i    (vec_data_err),
+
+    .ex_req_o       (vec_ex_req),
+    .ex_is_mul_o    (vec_ex_is_mul),
+    .ex_alu_op_o    (vec_ex_alu_op),
+    .ex_operand_a_o (vec_ex_operand_a),
+    .ex_operand_b_o (vec_ex_operand_b),
+    .ex_result_i    (vec_result_ex),
+    .ex_valid_i     (vec_ex_valid)
   );
 
   cve2_load_store_unit load_store_unit_i (
@@ -1530,6 +1654,17 @@ module cve2_core import cve2_pkg::*; #(
       rvfi_intr_q        <= rvfi_intr_d;
     end
   end
+
+// Temporary Debug Prints
+always_ff @(posedge clk_i) begin
+  if (vec_ex_req || vec_ex_valid) begin
+    $display("[CORE-VEX] req=%0d is_mul=%0d alu_op=%0d op_a=%h op_b=%h result=%h valid=%0d sel_vec_ex=%0d vec_busy=%0d ex_valid=%0d",
+             vec_ex_req, vec_ex_is_mul, vec_ex_alu_op,
+             vec_ex_operand_a, vec_ex_operand_b,
+             vec_result_ex, vec_ex_valid,
+             sel_vec_ex, vec_busy, ex_valid);
+  end
+end
 
 `else
   logic unused_instr_new_id, unused_instr_id_done;

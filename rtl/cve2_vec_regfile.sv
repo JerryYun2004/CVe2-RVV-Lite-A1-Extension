@@ -47,4 +47,12 @@ module cve2_vec_regfile #(
     end
   end
 
+  // Temporary Debug Prints
+  always_ff @(posedge clk_i) begin
+    if (we_i) begin
+      $display("[VRF-WR] waddr=%0d wdata[31:0]=%h wdata[63:32]=%h wdata[95:64]=%h wdata[127:96]=%h",
+              waddr_i, wdata_i[31:0], wdata_i[63:32], wdata_i[95:64], wdata_i[127:96]);
+    end
+  end
+
 endmodule

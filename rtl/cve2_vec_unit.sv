@@ -52,7 +52,16 @@ module cve2_vec_unit #(
   output logic [31:0]  data_wdata_o,
   input  logic [31:0]  data_rdata_i,
   input  logic         data_rvalid_i,
-  input  logic         data_err_i
+  input  logic         data_err_i,
+
+  // Reuse scalar EX hardware for vector ALU/multiply ops
+  output logic         ex_req_o,
+  output logic         ex_is_mul_o,
+  output logic [1:0]   ex_alu_op_o,
+  output logic [31:0]  ex_operand_a_o,
+  output logic [31:0]  ex_operand_b_o,
+  input  logic [31:0]  ex_result_i,
+  input  logic         ex_valid_i
 );
 
   localparam int unsigned LANES  = VLEN / SEW; // 8 when VLEN=256 and SEW=32
@@ -62,6 +71,7 @@ module cve2_vec_unit #(
   logic        req_valid_q;
   logic [31:0] instr_q;
   logic [31:0] rs1_q, rs2_q;
+  logic [VLEN-1:0]  acc_next;
 
   // Instruction fields
   wire [6:0] opcode = instr_q[6:0];
@@ -174,6 +184,11 @@ module cve2_vec_unit #(
   localparam logic [5:0] F6_VAND = 6'b001001;
   localparam logic [5:0] F6_VSRL = 6'b101000;
 
+  // Minimal EX op encoding for cve2_core mapping
+  localparam logic [1:0] EXOP_ADD = 2'd0;
+  localparam logic [1:0] EXOP_AND = 2'd1;
+  localparam logic [1:0] EXOP_SRL = 2'd2;
+
   function automatic vop_e decode_vop(input logic [31:0] instr);
     logic [6:0] op;
     logic [2:0] f3;
@@ -227,6 +242,7 @@ module cve2_vec_unit #(
   typedef enum logic [2:0] {
     S_IDLE,
     S_ALU,
+    S_EX_WAIT,
     S_MEM_REQ,
     S_MEM_WAIT,
     S_DONE
@@ -241,7 +257,11 @@ module cve2_vec_unit #(
   logic                       do_elem;
   logic [31:0]                vset_avl;
   logic [10:0]                vset_vtypei;
-  logic [31:0]                alu_a, alu_b, alu_r;
+  logic [31:0]                ex_op_a, ex_op_b;
+  logic [31:0] ex_hold_a_q, ex_hold_a_d;
+  logic [31:0] ex_hold_b_q, ex_hold_b_d;
+  logic        ex_hold_is_mul_q, ex_hold_is_mul_d;
+  logic [1:0]  ex_hold_alu_op_q, ex_hold_alu_op_d;
 
   // handshake to ID
   assign req_ready_o = ~req_valid_q;
@@ -271,6 +291,10 @@ module cve2_vec_unit #(
       idx_q       <= '0;
       mem_addr_q  <= 32'd0;
       acc_q       <= '0;
+      ex_hold_a_q      <= 32'd0;
+      ex_hold_b_q      <= 32'd0;
+      ex_hold_is_mul_q <= 1'b0;
+      ex_hold_alu_op_q <= EXOP_ADD;
     end else begin
       state_q    <= state_d;
       vl_q       <= vl_d;
@@ -278,7 +302,10 @@ module cve2_vec_unit #(
       mem_addr_q <= mem_addr_d;
       acc_q      <= acc_d;
       vop_q      <= vop_d;
-
+      ex_hold_a_q      <= ex_hold_a_d;
+      ex_hold_b_q      <= ex_hold_b_d;
+      ex_hold_is_mul_q <= ex_hold_is_mul_d;
+      ex_hold_alu_op_q <= ex_hold_alu_op_d;
       // accept new request
       if (req_valid_i && req_ready_o) begin
         req_valid_q <= 1'b1;
@@ -318,6 +345,13 @@ module cve2_vec_unit #(
     v_waddr        = '0;
     v_wdata        = '0;
 
+    ex_hold_a_d      = ex_hold_a_q;
+    ex_hold_b_d      = ex_hold_b_q;
+    ex_hold_is_mul_d = ex_hold_is_mul_q;
+    ex_hold_alu_op_d = ex_hold_alu_op_q;
+
+    acc_next       = acc_q;
+
     // next-state defaults
     state_d    = state_q;
     vl_d       = vl_q;
@@ -326,11 +360,15 @@ module cve2_vec_unit #(
     acc_d      = acc_q;
     vop_d      = vop_q;
     do_elem    = vm ? 1'b1 : mask_bit(int'(idx_q));
-    vset_avl   = 32'd0;
+    vset_avl    = 32'd0;
     vset_vtypei = 11'd0;
-    alu_a      = 32'd0;
-    alu_b      = 32'd0;
-    alu_r      = 32'd0;
+    ex_req_o       = 1'b0;
+    ex_is_mul_o    = 1'b0;
+    ex_alu_op_o    = EXOP_ADD;
+    ex_operand_a_o = 32'd0;
+    ex_operand_b_o = 32'd0;
+    ex_op_a        = 32'd0;
+    ex_op_b        = 32'd0;
 
     // when we just accepted a new request, initialize locals
     if (req_valid_i && req_ready_o) begin
@@ -390,49 +428,81 @@ module cve2_vec_unit #(
           VOP_VAND_VX,
           VOP_VAND_VI,
           VOP_VSRL_VI: begin
-            alu_a = get_elem32(v_r2, int'(idx_q)); // vs2
+            ex_op_a = get_elem32(v_r2, int'(idx_q)); // vs2
+
             unique case (vop_q)
               VOP_VADD_VV: begin
-                alu_b = get_elem32(v_r1, int'(idx_q)); // vs1
-                alu_r = alu_a + alu_b;
+                ex_op_b     = get_elem32(v_r1, int'(idx_q)); // vs1
+                ex_alu_op_o = EXOP_ADD;
               end
               VOP_VADD_VX: begin
-                alu_b = rs1_q;
-                alu_r = alu_a + alu_b;
+                ex_op_b     = rs1_q;
+                ex_alu_op_o = EXOP_ADD;
               end
               VOP_VMUL_VX: begin
-                alu_b = rs1_q;
-                alu_r = alu_a * alu_b;
+                ex_op_b     = rs1_q;
+                ex_is_mul_o = 1'b1;
               end
               VOP_VAND_VX: begin
-                alu_b = rs1_q;
-                alu_r = alu_a & alu_b;
+                ex_op_b     = rs1_q;
+                ex_alu_op_o = EXOP_AND;
               end
               VOP_VAND_VI: begin
-                alu_b = {27'd0, imm5};
-                alu_r = alu_a & alu_b;
+                ex_op_b     = {27'd0, imm5};
+                ex_alu_op_o = EXOP_AND;
               end
               VOP_VSRL_VI: begin
-                alu_b = {27'd0, imm5};
-                alu_r = alu_a >> alu_b[4:0];
+                ex_op_b     = {27'd0, imm5};
+                ex_alu_op_o = EXOP_SRL;
               end
               default: begin
-                alu_b = 32'd0;
-                alu_r = 32'd0;
+                ex_op_b     = 32'd0;
+                ex_alu_op_o = EXOP_ADD;
               end
             endcase
-
-            if (do_elem) begin
-              acc_d = set_elem32(acc_d, int'(idx_q), alu_r);
+            
+            if (vop_q == VOP_VADD_VV || vop_q == VOP_VMUL_VX || vop_q == VOP_VSRL_VI || vop_q == VOP_VAND_VX || vop_q == VOP_VAND_VI) begin
+              $display("[VEC-READ] instr=%h vop=%0d idx=%0d vd=%0d vs1=%0d vs2=%0d raddr1=%0d raddr2=%0d elem_r1=%h elem_r2=%h rs1_q=%h",
+                      instr_q, vop_q, idx_q, vd, vs1, vs2, raddr1, raddr2,
+                      get_elem32(v_r1, int'(idx_q)), get_elem32(v_r2, int'(idx_q)), rs1_q);
             end
 
-            if (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1)) begin
-              v_we    = 1'b1;
-              v_waddr = vd[REG_AW-1:0];
-              v_wdata = acc_d;
-              state_d = S_DONE;
+            ex_req_o       = 1'b1;
+            ex_operand_a_o = ex_op_a;
+            ex_operand_b_o = ex_op_b;
+
+            ex_hold_a_d      = ex_op_a;
+            ex_hold_b_d      = ex_op_b;
+            ex_hold_is_mul_d = (vop_q == VOP_VMUL_VX);
+            ex_hold_alu_op_d = ex_alu_op_o;
+
+
+            // Reused EX ops may complete in the same cycle, including
+            // vmul.vx in the current single-cycle multiply configuration.
+            // Consume that result here so we do not miss the pulse by
+            // unconditionally transitioning to S_EX_WAIT.
+            if (ex_valid_i) begin
+              if (do_elem) begin
+                acc_next = set_elem32(acc_q, int'(idx_q), ex_result_i);
+              end else begin
+                acc_next = acc_q;
+              end
+
+              acc_d = acc_next;
+
+              if (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1)) begin
+                v_we    = 1'b1;
+                v_waddr = vd[REG_AW-1:0];
+                v_wdata = acc_next;
+                state_d = S_DONE;
+              end else begin
+                idx_d   = idx_q + 1'b1;
+                state_d = S_ALU;
+              end
             end else begin
-              idx_d = idx_q + 1'b1;
+              // If the reused EX path does not return valid in the launch
+              // cycle, wait here for completion.
+              state_d = S_EX_WAIT;
             end
           end
 
@@ -450,6 +520,32 @@ module cve2_vec_unit #(
             state_d = S_DONE;
           end
         endcase
+      end
+
+      S_EX_WAIT: begin
+        ex_req_o       = 1'b1;
+        ex_operand_a_o = ex_hold_a_q;
+        ex_operand_b_o = ex_hold_b_q;
+        ex_is_mul_o    = ex_hold_is_mul_q;
+        ex_alu_op_o    = ex_hold_alu_op_q;
+
+        if (ex_valid_i) begin
+          if (do_elem) begin
+            acc_d = set_elem32(acc_q, int'(idx_q), ex_result_i);
+          end else begin
+            acc_d = acc_q;
+          end
+
+          if (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1)) begin
+            v_we    = 1'b1;
+            v_waddr = vd[REG_AW-1:0];
+            v_wdata = acc_d;
+            state_d = S_DONE;
+          end else begin
+            idx_d   = idx_q + 1'b1;
+            state_d = S_ALU;
+          end
+        end
       end
 
       S_MEM_REQ: begin
@@ -513,6 +609,32 @@ module cve2_vec_unit #(
         state_d = S_IDLE;
       end
     endcase
+  end
+
+  // Temporary Debug Prints
+  always_ff @(posedge clk_i) begin
+    if (state_q != S_IDLE || req_valid_q) begin
+      $display("[VEC] state=%0d idx=%0d vl=%0d ex_req=%0d ex_valid=%0d done=%0d busy=%0d instr=%h",
+              state_q, idx_q, vl_q, ex_req_o, ex_valid_i, done_o, busy_o, instr_q);
+    end
+  end
+
+  always_ff @(posedge clk_i) begin
+  if (state_q == S_EX_WAIT || ex_valid_i) begin
+    $display("[VEC-EXWAIT] state=%0d idx=%0d vop=%0d hold_a=%h hold_b=%h hold_mul=%0d hold_alu=%0d ex_a_o=%h ex_b_o=%h ex_req=%0d ex_valid_i=%0d ex_result_i=%h",
+             state_q, idx_q, vop_q,
+             ex_hold_a_q, ex_hold_b_q, ex_hold_is_mul_q, ex_hold_alu_op_q,
+             ex_operand_a_o, ex_operand_b_o,
+             ex_req_o, ex_valid_i, ex_result_i);
+  end
+end
+
+  always_ff @(posedge clk_i) begin
+    if (v_we) begin
+      $display("[VEC-WR] instr=%h vop=%0d vd=%0d idx=%0d v_waddr=%0d v_wdata[31:0]=%h v_wdata[63:32]=%h",
+              instr_q, vop_q, vd, idx_q, v_waddr,
+              v_wdata[31:0], v_wdata[63:32]);
+    end
   end
 
 endmodule

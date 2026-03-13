@@ -302,6 +302,16 @@ module cve2_id_stage #(
 
   logic coproc_done;
 
+
+  // Temporary Debugs
+  always_ff @(posedge clk_i) begin
+    if (vec_insn_dec || vec_busy_i || vec_done_i) begin
+      $display("[ID-VEC] pc=%h instr=%h vec_insn=%0d req=%0d ready=%0d busy=%0d done=%0d stall_vec=%0d",
+              pc_id_i, instr_rdata_i, vec_insn_dec, vec_req_valid_o, vec_req_ready_i,
+              vec_busy_i, vec_done_i, stall_vec);
+    end
+  end
+  
   // CV-X-IF
   if (XInterface) begin: gen_xif
 
