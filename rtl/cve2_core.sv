@@ -605,13 +605,13 @@ module cve2_core import cve2_pkg::*; #(
   // Reuse scalar EX hardware for vector arithmetic/multiply micro-ops.
   wire sel_vec_ex = vec_ex_req | (vec_busy & vec_ex_is_mul);
 
-  // Temporary Debug Prints
-  always_ff @(posedge clk_i) begin
-    if (vec_ex_req || sel_vec_ex) begin
-      $display("[CORE-SEL] vec_ex_req=%0d vec_busy=%0d vec_ex_is_mul=%0d sel_vec_ex=%0d",
-              vec_ex_req, vec_busy, vec_ex_is_mul, sel_vec_ex);
-    end
-  end
+  // // Temporary Debug Prints
+  // always_ff @(posedge clk_i) begin
+  //   if (vec_ex_req || sel_vec_ex) begin
+  //     $display("[CORE-SEL] vec_ex_req=%0d vec_busy=%0d vec_ex_is_mul=%0d sel_vec_ex=%0d",
+  //             vec_ex_req, vec_busy, vec_ex_is_mul, sel_vec_ex);
+  //   end
+  // end
 
   always_comb begin
 
@@ -662,38 +662,38 @@ module cve2_core import cve2_pkg::*; #(
     end
 
 
-    // Temporary Debug Prints
-    if (sel_vec_ex) begin
-      $write("[CORE-MUX-COMB] sel_vec_ex=%0d vec_ex_is_mul=%0d vec_ex_alu_op=%0d alu_operator_ex=%0d alu_operator_ex_mux=%0d mult_sel_ex=%0d mult_sel_ex_mux=%0d div_sel_ex=%0d div_sel_ex_mux=%0d\n",
-            sel_vec_ex, vec_ex_is_mul, vec_ex_alu_op,
-            alu_operator_ex, alu_operator_ex_mux,
-            mult_sel_ex, mult_sel_ex_mux,
-            div_sel_ex, div_sel_ex_mux);
-    end
+    // // Temporary Debug Prints
+    // if (sel_vec_ex) begin
+    //   $write("[CORE-MUX-COMB] sel_vec_ex=%0d vec_ex_is_mul=%0d vec_ex_alu_op=%0d alu_operator_ex=%0d alu_operator_ex_mux=%0d mult_sel_ex=%0d mult_sel_ex_mux=%0d div_sel_ex=%0d div_sel_ex_mux=%0d\n",
+    //         sel_vec_ex, vec_ex_is_mul, vec_ex_alu_op,
+    //         alu_operator_ex, alu_operator_ex_mux,
+    //         mult_sel_ex, mult_sel_ex_mux,
+    //         div_sel_ex, div_sel_ex_mux);
+    // end
 
   end
 
   assign vec_result_ex = result_ex;
   assign vec_ex_valid  = ex_valid & sel_vec_ex;
 
-  // Temporary Debug Prints
-  always_ff @(posedge clk_i) begin
-    if (sel_vec_ex || vec_ex_valid) begin
-      $display("[CORE-VEX-OP] vec_ex_alu_op=%0d alu_operator_ex_mux=%0d sel_vec_ex=%0d req=%0d is_mul=%0d op_a=%h op_b=%h result_ex=%h ex_valid=%0d vec_ex_valid=%0d",
-               vec_ex_alu_op, alu_operator_ex_mux, sel_vec_ex,
-               vec_ex_req, vec_ex_is_mul,
-               vec_ex_operand_a, vec_ex_operand_b,
-               result_ex, ex_valid, vec_ex_valid);
-    end
-  end
+  // // Temporary Debug Prints
+  // always_ff @(posedge clk_i) begin
+  //   if (sel_vec_ex || vec_ex_valid) begin
+  //     $display("[CORE-VEX-OP] vec_ex_alu_op=%0d alu_operator_ex_mux=%0d sel_vec_ex=%0d req=%0d is_mul=%0d op_a=%h op_b=%h result_ex=%h ex_valid=%0d vec_ex_valid=%0d",
+  //              vec_ex_alu_op, alu_operator_ex_mux, sel_vec_ex,
+  //              vec_ex_req, vec_ex_is_mul,
+  //              vec_ex_operand_a, vec_ex_operand_b,
+  //              result_ex, ex_valid, vec_ex_valid);
+  //   end
+  // end
 
-  always_ff @(posedge clk_i) begin
-    if (vec_ex_req || vec_ex_valid) begin
-      $display("[CORE-VEX-VALID] req=%0d sel=%0d is_mul=%0d result_ex=%h ex_valid=%0d vec_valid=%0d",
-              vec_ex_req, sel_vec_ex, vec_ex_is_mul,
-              result_ex, ex_valid, vec_ex_valid);
-    end
-  end
+  // always_ff @(posedge clk_i) begin
+  //   if (vec_ex_req || vec_ex_valid) begin
+  //     $display("[CORE-VEX-VALID] req=%0d sel=%0d is_mul=%0d result_ex=%h ex_valid=%0d vec_valid=%0d",
+  //             vec_ex_req, sel_vec_ex, vec_ex_is_mul,
+  //             result_ex, ex_valid, vec_ex_valid);
+  //   end
+  // end
 
   cve2_ex_block #(
     .RV32M          (RV32M),
@@ -1655,16 +1655,16 @@ module cve2_core import cve2_pkg::*; #(
     end
   end
 
-// Temporary Debug Prints
-always_ff @(posedge clk_i) begin
-  if (vec_ex_req || vec_ex_valid) begin
-    $display("[CORE-VEX] req=%0d is_mul=%0d alu_op=%0d op_a=%h op_b=%h result=%h valid=%0d sel_vec_ex=%0d vec_busy=%0d ex_valid=%0d",
-             vec_ex_req, vec_ex_is_mul, vec_ex_alu_op,
-             vec_ex_operand_a, vec_ex_operand_b,
-             vec_result_ex, vec_ex_valid,
-             sel_vec_ex, vec_busy, ex_valid);
-  end
-end
+// // Temporary Debug Prints
+// always_ff @(posedge clk_i) begin
+//   if (vec_ex_req || vec_ex_valid) begin
+//     $display("[CORE-VEX] req=%0d is_mul=%0d alu_op=%0d op_a=%h op_b=%h result=%h valid=%0d sel_vec_ex=%0d vec_busy=%0d ex_valid=%0d",
+//              vec_ex_req, vec_ex_is_mul, vec_ex_alu_op,
+//              vec_ex_operand_a, vec_ex_operand_b,
+//              vec_result_ex, vec_ex_valid,
+//              sel_vec_ex, vec_busy, ex_valid);
+//   end
+// end
 
 `else
   logic unused_instr_new_id, unused_instr_id_done;

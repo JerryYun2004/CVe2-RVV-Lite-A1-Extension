@@ -102,11 +102,12 @@ end
   // prepare operand b
   assign operand_b_neg = {operand_b_i,1'b0} ^ {33{1'b1}};
   always_comb begin
-    if (multdiv_sel_i && adder_op_b_negate) begin
-      $write("[ALU-ASSERTDBG-B] operator_i=%0d multdiv_sel_i=%0d adder_op_b_negate=%0d operand_a_i=%h operand_b_i=%h multdiv_operand_b_i=%h\n",
-            operator_i, multdiv_sel_i, adder_op_b_negate,
-            operand_a_i, operand_b_i, multdiv_operand_b_i);
-    end
+    // Temporary Debug Prints
+    // if (multdiv_sel_i && adder_op_b_negate) begin
+    //   $write("[ALU-ASSERTDBG-B] operator_i=%0d multdiv_sel_i=%0d adder_op_b_negate=%0d operand_a_i=%h operand_b_i=%h multdiv_operand_b_i=%h\n",
+    //         operator_i, multdiv_sel_i, adder_op_b_negate,
+    //         operand_a_i, operand_b_i, multdiv_operand_b_i);
+    // end
 
     priority case (1'b1)
       multdiv_sel_i:     adder_in_b = multdiv_operand_b_i;
