@@ -24,7 +24,7 @@
 module cve2_vec_unit #(
   parameter int unsigned VLEN     = 256,
   parameter int unsigned SEW      = 32,
-  parameter int unsigned NUM_REGS = 32
+  parameter int unsigned NUM_REGS = 16
 ) (
   input  logic         clk_i,
   input  logic         rst_ni,
@@ -93,6 +93,12 @@ module cve2_vec_unit #(
   wire [4:0] vs1 = rs1;
   wire [4:0] vs2 = rs2;
   wire [4:0] vs3 = rd; // store data is in rd field for STORE-FP encodings
+
+  function automatic logic vreg_idx_valid(input logic [4:0] idx);
+    begin
+      vreg_idx_valid = (idx < NUM_REGS);
+    end
+  endfunction
 
   // ----------------------
   // Vector register file
@@ -167,6 +173,34 @@ module cve2_vec_unit #(
   } vop_e;
 
   vop_e vop_q, vop_d;
+
+function automatic logic instr_vregs_valid(input vop_e op, input logic [31:0] instr);
+  logic [4:0] rd_i, rs1_i, rs2_i;
+  begin
+    rd_i  = instr[11:7];
+    rs1_i = instr[19:15];
+    rs2_i = instr[24:20];
+
+    unique case (op)
+      VOP_VLE32:    instr_vregs_valid = vreg_idx_valid(rd_i);
+      VOP_VSE32:    instr_vregs_valid = vreg_idx_valid(rd_i); // store data is in rd/vs3 field
+      VOP_VADD_VV:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs1_i) &&
+                                         vreg_idx_valid(rs2_i);
+      VOP_VADD_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs2_i);
+      VOP_VMUL_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs2_i);
+      VOP_VAND_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs2_i);
+      VOP_VAND_VI:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs2_i);
+      VOP_VSRL_VI:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs2_i);
+      default:      instr_vregs_valid = 1'b1;
+    endcase
+  end
+endfunction
 
   localparam logic [6:0] OPC_OPV     = 7'h57;
   localparam logic [6:0] OPC_LOADFP  = 7'h07;
@@ -374,21 +408,28 @@ module cve2_vec_unit #(
       mem_addr_d = req_rs1_i;
       acc_d      = '0;
 
-      unique case (decode_vop(req_instr_i))
-        VOP_VLE32,
-        VOP_VSE32: state_d = S_MEM_REQ;
+      if (!instr_vregs_valid(decode_vop(req_instr_i), req_instr_i)) begin
+        // Prevent silent aliasing when NUM_REGS < 32.
+        // Treat out-of-range vector register references as a no-op completion.
+        state_d = S_ALU;
+        vop_d   = VOP_NONE;
+      end else begin
+        unique case (decode_vop(req_instr_i))
+          VOP_VLE32,
+          VOP_VSE32: state_d = S_MEM_REQ;
 
-        VOP_VSET,
-        VOP_VADD_VV,
-        VOP_VADD_VX,
-        VOP_VMUL_VX,
-        VOP_VAND_VX,
-        VOP_VAND_VI,
-        VOP_VSRL_VI,
-        VOP_NONE: state_d = S_ALU;
+          VOP_VSET,
+          VOP_VADD_VV,
+          VOP_VADD_VX,
+          VOP_VMUL_VX,
+          VOP_VAND_VX,
+          VOP_VAND_VI,
+          VOP_VSRL_VI,
+          VOP_NONE: state_d = S_ALU;
 
-        default: state_d = S_ALU;
-      endcase
+          default: state_d = S_ALU;
+        endcase
+      end
     end
 
     unique case (state_q)

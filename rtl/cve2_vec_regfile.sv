@@ -6,7 +6,7 @@
 
 module cve2_vec_regfile #(
   parameter int unsigned VLEN     = 256,
-  parameter int unsigned NUM_REGS = 32
+  parameter int unsigned NUM_REGS = 16
 ) (
   input  logic                       clk_i,
   input  logic                       rst_ni,
