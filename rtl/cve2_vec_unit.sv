@@ -275,6 +275,7 @@ endfunction
   // ----------------------
   typedef enum logic [2:0] {
     S_IDLE,
+    S_VRF_READ,
     S_ALU,
     S_EX_WAIT,
     S_MEM_REQ,
@@ -415,16 +416,17 @@ endfunction
         vop_d   = VOP_NONE;
       end else begin
         unique case (decode_vop(req_instr_i))
-          VOP_VLE32,
-          VOP_VSE32: state_d = S_MEM_REQ;
+          VOP_VLE32: state_d = S_MEM_REQ;
 
-          VOP_VSET,
+          VOP_VSE32,
           VOP_VADD_VV,
           VOP_VADD_VX,
           VOP_VMUL_VX,
           VOP_VAND_VX,
           VOP_VAND_VI,
-          VOP_VSRL_VI,
+          VOP_VSRL_VI: state_d = S_VRF_READ;
+
+          VOP_VSET,
           VOP_NONE: state_d = S_ALU;
 
           default: state_d = S_ALU;
@@ -435,6 +437,34 @@ endfunction
     unique case (state_q)
       S_IDLE: begin
         // stay idle; accept block above chooses next state for new requests
+      end
+
+      S_VRF_READ: begin
+        // BRAM-backed VRF has registered read outputs. Spend one cycle here
+        // after request acceptance so v_r1/v_r2 update before use.
+        if (vl_q == '0) begin
+          done_d  = 1'b1;
+          state_d = S_IDLE;
+        end else begin
+          unique case (vop_q)
+            VOP_VSE32: begin
+              state_d = S_MEM_REQ;
+            end
+
+            VOP_VADD_VV,
+            VOP_VADD_VX,
+            VOP_VMUL_VX,
+            VOP_VAND_VX,
+            VOP_VAND_VI,
+            VOP_VSRL_VI: begin
+              state_d = S_ALU;
+            end
+
+            default: begin
+              state_d = S_ALU;
+            end
+          endcase
+        end
       end
 
          S_ALU: begin
