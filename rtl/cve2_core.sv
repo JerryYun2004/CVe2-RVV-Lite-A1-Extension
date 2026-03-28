@@ -243,6 +243,8 @@ module cve2_core import cve2_pkg::*; #(
   logic [31:0] vec_ex_operand_b;
   logic [31:0] vec_result_ex;
   logic        vec_ex_valid;
+  logic [31:0] vec_result_ex_q;
+  logic        vec_ex_valid_q;
 
   // EX input muxes (scalar or vector micro-op)
   alu_op_e     alu_operator_ex_mux;
@@ -673,8 +675,18 @@ module cve2_core import cve2_pkg::*; #(
 
   end
 
-  assign vec_result_ex = result_ex;
-  assign vec_ex_valid  = ex_valid & sel_vec_ex;
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      vec_result_ex_q <= 32'd0;
+      vec_ex_valid_q  <= 1'b0;
+    end else begin
+      vec_result_ex_q <= result_ex;
+      vec_ex_valid_q  <= ex_valid & sel_vec_ex;
+    end
+  end
+
+  assign vec_result_ex = vec_result_ex_q;
+  assign vec_ex_valid  = vec_ex_valid_q;
 
   // // Temporary Debug Prints
   // always_ff @(posedge clk_i) begin

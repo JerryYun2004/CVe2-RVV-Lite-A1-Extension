@@ -18,7 +18,7 @@
 // - vse32.v (unit-stride only)
 // - vadd.vv, vadd.vx
 // - vmul.vx
-// - vand.vi
+// - vand.vx, vand.vi
 // - vsrl.vi
 
 module cve2_vec_unit #(
@@ -166,6 +166,7 @@ module cve2_vec_unit #(
     VOP_VSE32,
     VOP_VADD_VV,
     VOP_VADD_VX,
+    VOP_VMUL_VV,
     VOP_VMUL_VX,
     VOP_VAND_VX,
     VOP_VAND_VI,
@@ -188,6 +189,9 @@ function automatic logic instr_vregs_valid(input vop_e op, input logic [31:0] in
                                          vreg_idx_valid(rs1_i) &&
                                          vreg_idx_valid(rs2_i);
       VOP_VADD_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs2_i);
+      VOP_VMUL_VV:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
+                                         vreg_idx_valid(rs1_i) &&
                                          vreg_idx_valid(rs2_i);
       VOP_VMUL_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
                                          vreg_idx_valid(rs2_i);
@@ -239,6 +243,7 @@ endfunction
 
       if (op == OPC_OPV && f3 == F3_OPIVV && f6 == F6_VADD) return VOP_VADD_VV;
       if (op == OPC_OPV && f3 == F3_OPIVX && f6 == F6_VADD) return VOP_VADD_VX;
+      if (op == OPC_OPV && f3 == F3_OPIVV && f6 == F6_VMUL) return VOP_VMUL_VV;
       if (op == OPC_OPV && f3 == F3_OPIVX && f6 == F6_VMUL) return VOP_VMUL_VX;
       if (op == OPC_OPV && f3 == F3_OPIVX && f6 == F6_VAND) return VOP_VAND_VX;
       if (op == OPC_OPV && f3 == F3_OPIVI && f6 == F6_VAND) return VOP_VAND_VI;
@@ -275,7 +280,6 @@ endfunction
   // ----------------------
   typedef enum logic [2:0] {
     S_IDLE,
-    S_VRF_READ,
     S_ALU,
     S_EX_WAIT,
     S_MEM_REQ,
@@ -285,7 +289,7 @@ endfunction
   state_e state_q, state_d;
 
   logic [$clog2(LANES+1)-1:0] vl_q, vl_d;            // 0..LANES
-  logic [$clog2(LANES)-1:0]   idx_q, idx_d;          // element index
+  logic [$clog2(LANES+1)-1:0] idx_q, idx_d;          // element index / next-to-issue
   logic [31:0]                mem_addr_q, mem_addr_d;
   logic [VLEN-1:0]            acc_q, acc_d;          // dest accumulator
   logic                       do_elem;
@@ -297,6 +301,12 @@ endfunction
   logic        ex_hold_is_mul_q, ex_hold_is_mul_d;
   logic [1:0]  ex_hold_alu_op_q, ex_hold_alu_op_d;
   logic        done_d;
+  logic                       ex_pipe_valid_q, ex_pipe_valid_d;
+  logic [$clog2(LANES+1)-1:0] ex_pipe_idx_q, ex_pipe_idx_d;
+  logic [VLEN-1:0]            acc_work;
+  logic                       have_free_slot;
+  logic                       all_issued;
+  logic                       commit_masked;
 
   // handshake to ID
   assign req_ready_o = ~req_valid_q;
@@ -330,6 +340,8 @@ endfunction
       ex_hold_b_q      <= 32'd0;
       ex_hold_is_mul_q <= 1'b0;
       ex_hold_alu_op_q <= EXOP_ADD;
+      ex_pipe_valid_q  <= 1'b0;
+      ex_pipe_idx_q    <= '0;
     end else begin
       state_q    <= state_d;
       vl_q       <= vl_d;
@@ -341,6 +353,8 @@ endfunction
       ex_hold_b_q      <= ex_hold_b_d;
       ex_hold_is_mul_q <= ex_hold_is_mul_d;
       ex_hold_alu_op_q <= ex_hold_alu_op_d;
+      ex_pipe_valid_q  <= ex_pipe_valid_d;
+      ex_pipe_idx_q    <= ex_pipe_idx_d;
 
       // accept new request
       if (req_valid_i && req_ready_o) begin
@@ -379,8 +393,14 @@ endfunction
     ex_hold_b_d      = ex_hold_b_q;
     ex_hold_is_mul_d = ex_hold_is_mul_q;
     ex_hold_alu_op_d = ex_hold_alu_op_q;
+    ex_pipe_valid_d  = ex_pipe_valid_q;
+    ex_pipe_idx_d    = ex_pipe_idx_q;
 
     acc_next       = acc_q;
+    acc_work       = acc_q;
+    have_free_slot = 1'b0;
+    all_issued     = 1'b0;
+    commit_masked  = 1'b0;
 
     // next-state defaults
     state_d    = state_q;
@@ -404,10 +424,12 @@ endfunction
     // when we just accepted a new request, initialize locals and choose the
     // real first state directly.
     if (req_valid_i && req_ready_o) begin
-      vop_d      = decode_vop(req_instr_i);
-      idx_d      = '0;
-      mem_addr_d = req_rs1_i;
-      acc_d      = '0;
+      vop_d           = decode_vop(req_instr_i);
+      idx_d           = '0;
+      mem_addr_d      = req_rs1_i;
+      acc_d           = '0;
+      ex_pipe_valid_d = 1'b0;
+      ex_pipe_idx_d   = '0;
 
       if (!instr_vregs_valid(decode_vop(req_instr_i), req_instr_i)) begin
         // Prevent silent aliasing when NUM_REGS < 32.
@@ -416,17 +438,17 @@ endfunction
         vop_d   = VOP_NONE;
       end else begin
         unique case (decode_vop(req_instr_i))
-          VOP_VLE32: state_d = S_MEM_REQ;
+          VOP_VLE32,
+          VOP_VSE32: state_d = S_MEM_REQ;
 
-          VOP_VSE32,
+          VOP_VSET,
           VOP_VADD_VV,
           VOP_VADD_VX,
+          VOP_VMUL_VV,
           VOP_VMUL_VX,
           VOP_VAND_VX,
           VOP_VAND_VI,
-          VOP_VSRL_VI: state_d = S_VRF_READ;
-
-          VOP_VSET,
+          VOP_VSRL_VI,
           VOP_NONE: state_d = S_ALU;
 
           default: state_d = S_ALU;
@@ -437,34 +459,6 @@ endfunction
     unique case (state_q)
       S_IDLE: begin
         // stay idle; accept block above chooses next state for new requests
-      end
-
-      S_VRF_READ: begin
-        // BRAM-backed VRF has registered read outputs. Spend one cycle here
-        // after request acceptance so v_r1/v_r2 update before use.
-        if (vl_q == '0) begin
-          done_d  = 1'b1;
-          state_d = S_IDLE;
-        end else begin
-          unique case (vop_q)
-            VOP_VSE32: begin
-              state_d = S_MEM_REQ;
-            end
-
-            VOP_VADD_VV,
-            VOP_VADD_VX,
-            VOP_VMUL_VX,
-            VOP_VAND_VX,
-            VOP_VAND_VI,
-            VOP_VSRL_VI: begin
-              state_d = S_ALU;
-            end
-
-            default: begin
-              state_d = S_ALU;
-            end
-          endcase
-        end
       end
 
          S_ALU: begin
@@ -511,50 +505,104 @@ endfunction
               state_d        = S_IDLE;
             end
 
+            // Bubble-free pipeline for ALU-style reused EX ops.
+            // ex_valid_i/ex_result_i now come from a registered boundary in cve2_core.sv,
+            // so consuming them here is safe and does not create a combinational loop.
             VOP_VADD_VV,
             VOP_VADD_VX,
-            VOP_VMUL_VX,
             VOP_VAND_VX,
             VOP_VAND_VI,
             VOP_VSRL_VI: begin
+              acc_work       = acc_q;
+              have_free_slot = !ex_pipe_valid_q;
+              all_issued     = (idx_q == vl_q);
+
+              // Commit previously launched element if its registered EX result is ready.
+              if (ex_pipe_valid_q && ex_valid_i) begin
+                commit_masked = vm ? 1'b1 : mask_bit(int'(ex_pipe_idx_q));
+
+                if (commit_masked) begin
+                  acc_work = set_elem32(acc_work, int'(ex_pipe_idx_q), ex_result_i);
+                end
+
+                ex_pipe_valid_d = 1'b0;
+                have_free_slot  = 1'b1;
+              end
+
+              acc_d = acc_work;
+
+              // Launch next element in the same cycle that the previous one commits.
+              if (have_free_slot && !all_issued) begin
+                ex_op_a = get_elem32(v_r2, int'(idx_q)); // vs2
+
+                unique case (vop_q)
+                  VOP_VADD_VV: begin
+                    ex_op_b     = get_elem32(v_r1, int'(idx_q)); // vs1
+                    ex_alu_op_o = EXOP_ADD;
+                  end
+                  VOP_VADD_VX: begin
+                    ex_op_b     = rs1_q;
+                    ex_alu_op_o = EXOP_ADD;
+                  end
+                  VOP_VAND_VX: begin
+                    ex_op_b     = rs1_q;
+                    ex_alu_op_o = EXOP_AND;
+                  end
+                  VOP_VAND_VI: begin
+                    ex_op_b     = {27'd0, imm5};
+                    ex_alu_op_o = EXOP_AND;
+                  end
+                  VOP_VSRL_VI: begin
+                    ex_op_b     = {27'd0, imm5};
+                    ex_alu_op_o = EXOP_SRL;
+                  end
+                  default: begin
+                    ex_op_b     = 32'd0;
+                    ex_alu_op_o = EXOP_ADD;
+                  end
+                endcase
+
+                ex_req_o       = 1'b1;
+                ex_operand_a_o = ex_op_a;
+                ex_operand_b_o = ex_op_b;
+                ex_is_mul_o    = 1'b0;
+
+                ex_pipe_valid_d = 1'b1;
+                ex_pipe_idx_d   = idx_q;
+                idx_d           = idx_q + 1'b1;
+              end
+
+              // Finish only after the last launched element has actually committed.
+              if ((idx_q == vl_q) && !ex_pipe_valid_d) begin
+                v_we    = 1'b1;
+                v_waddr = vd[REG_AW-1:0];
+                v_wdata = acc_work;
+                done_d  = 1'b1;
+                state_d = S_IDLE;
+              end else begin
+                state_d = S_ALU;
+              end
+            end
+
+            // Keep multiply conservative and safe for generic RV32M behavior.
+            VOP_VMUL_VV,
+            VOP_VMUL_VX: begin
               ex_op_a = get_elem32(v_r2, int'(idx_q)); // vs2
 
               unique case (vop_q)
-                VOP_VADD_VV: begin
+                VOP_VMUL_VV: begin
                   ex_op_b     = get_elem32(v_r1, int'(idx_q)); // vs1
-                  ex_alu_op_o = EXOP_ADD;
-                end
-                VOP_VADD_VX: begin
-                  ex_op_b     = rs1_q;
-                  ex_alu_op_o = EXOP_ADD;
+                  ex_is_mul_o = 1'b1;
                 end
                 VOP_VMUL_VX: begin
                   ex_op_b     = rs1_q;
                   ex_is_mul_o = 1'b1;
                 end
-                VOP_VAND_VX: begin
-                  ex_op_b     = rs1_q;
-                  ex_alu_op_o = EXOP_AND;
-                end
-                VOP_VAND_VI: begin
-                  ex_op_b     = {27'd0, imm5};
-                  ex_alu_op_o = EXOP_AND;
-                end
-                VOP_VSRL_VI: begin
-                  ex_op_b     = {27'd0, imm5};
-                  ex_alu_op_o = EXOP_SRL;
-                end
                 default: begin
                   ex_op_b     = 32'd0;
-                  ex_alu_op_o = EXOP_ADD;
+                  ex_is_mul_o = 1'b1;
                 end
               endcase
-              // Temporary debug prints
-              // if (vop_q == VOP_VADD_VV || vop_q == VOP_VMUL_VX || vop_q == VOP_VSRL_VI || vop_q == VOP_VAND_VX || vop_q == VOP_VAND_VI) begin
-              //   $display("[VEC-READ] instr=%h vop=%0d idx=%0d vd=%0d vs1=%0d vs2=%0d raddr1=%0d raddr2=%0d elem_r1=%h elem_r2=%h rs1_q=%h",
-              //           instr_q, vop_q, idx_q, vd, vs1, vs2, raddr1, raddr2,
-              //           get_elem32(v_r1, int'(idx_q)), get_elem32(v_r2, int'(idx_q)), rs1_q);
-              // end
 
               ex_req_o       = 1'b1;
               ex_operand_a_o = ex_op_a;
@@ -562,37 +610,10 @@ endfunction
 
               ex_hold_a_d      = ex_op_a;
               ex_hold_b_d      = ex_op_b;
-              ex_hold_is_mul_d = (vop_q == VOP_VMUL_VX);
-              ex_hold_alu_op_d = ex_alu_op_o;
+              ex_hold_is_mul_d = 1'b1;
+              ex_hold_alu_op_d = EXOP_ADD;
 
-              // Reused EX ops may complete in the same cycle, including
-              // vmul.vx in the current single-cycle multiply configuration.
-              // Consume that result here so we do not miss the pulse by
-              // unconditionally transitioning to S_EX_WAIT.
-              if (ex_valid_i) begin
-                if (do_elem) begin
-                  acc_next = set_elem32(acc_q, int'(idx_q), ex_result_i);
-                end else begin
-                  acc_next = acc_q;
-                end
-
-                acc_d = acc_next;
-
-                if (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1)) begin
-                  v_we    = 1'b1;
-                  v_waddr = vd[REG_AW-1:0];
-                  v_wdata = acc_next;
-                  done_d  = 1'b1;
-                  state_d = S_IDLE;
-                end else begin
-                  idx_d   = idx_q + 1'b1;
-                  state_d = S_ALU;
-                end
-              end else begin
-                // If the reused EX path does not return valid in the launch
-                // cycle, wait here for completion.
-                state_d = S_EX_WAIT;
-              end
+              state_d = S_EX_WAIT;
             end
 
             VOP_VLE32,

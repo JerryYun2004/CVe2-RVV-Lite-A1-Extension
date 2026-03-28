@@ -1240,12 +1240,18 @@ module cve2_decoder #(
 
     // OP-V arithmetic subset
     if (opcode == VEC_OPC_OPV) begin
-      if ((vec_funct3 == VEC_F3_OPIVV) && (vec_funct6 == VEC_F6_VADD)) vec_insn = 1'b1;
+      if ((vec_funct3 == VEC_F3_OPIVV) &&
+          ((vec_funct6 == VEC_F6_VADD) ||
+           (vec_funct6 == VEC_F6_VMUL))) vec_insn = 1'b1;
+
       if ((vec_funct3 == VEC_F3_OPIVX) &&
           ((vec_funct6 == VEC_F6_VADD) ||
            (vec_funct6 == VEC_F6_VMUL) ||
            (vec_funct6 == VEC_F6_VAND))) vec_insn = 1'b1;
-      if ((vec_funct3 == VEC_F3_OPIVI) && ((vec_funct6 == VEC_F6_VAND) || (vec_funct6 == VEC_F6_VSRL))) vec_insn = 1'b1;
+
+      if ((vec_funct3 == VEC_F3_OPIVI) &&
+          ((vec_funct6 == VEC_F6_VAND) ||
+           (vec_funct6 == VEC_F6_VSRL))) vec_insn = 1'b1;
     end
   end
 
