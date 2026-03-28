@@ -1,3 +1,4 @@
+
 // Copyright (c) 2026
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -8,16 +9,19 @@
 // - SEW fixed to 32, LMUL fixed to 1.
 // - VLEN fixed (default 256b => 8 elements).
 // - Minimal mask support using v0 (packed bit mask: v0[i] is mask for element i).
-// - Tail agnostic: elements >= vl are don't care (we leave them unchanged).
-// - Safe/simple uarch: one element per cycle; vector loads/stores are serialized.
+// - Tail agnostic.
+// - Safe/simple uarch.
 // - Internal hardware loop counter (element index) and post-increment address counter for vmem ops.
+// - Strict reuse of original CVE2 scalar EX hardware for vector ALU/multiply ops.
+// - 1R1W VRF support: vv ops serialize the two vector source reads, while vx/vi
+//   ops keep one-lane-per-cycle issue/retire after pipeline fill.
 //
-// Supported instruction subset (sufficient for rgba2luma-style kernels):
+// Supported instruction subset:
 // - vsetvli / vsetivli / vsetvl  (fixed to SEW=32, LMUL=1, TA=1)
 // - vle32.v (unit-stride only)
 // - vse32.v (unit-stride only)
 // - vadd.vv, vadd.vx
-// - vmul.vx
+// - vmul.vv, vmul.vx
 // - vand.vx, vand.vi
 // - vsrl.vi
 
@@ -32,8 +36,8 @@ module cve2_vec_unit #(
   // Request from ID stage
   input  logic         req_valid_i,
   input  logic [31:0]  req_instr_i,
-  input  logic [31:0]  req_rs1_i,    // scalar x[rs1] value
-  input  logic [31:0]  req_rs2_i,    // scalar x[rs2] value (used for vsetvl)
+  input  logic [31:0]  req_rs1_i,
+  input  logic [31:0]  req_rs2_i,
   output logic         req_ready_o,
 
   // Completion back to ID stage
@@ -43,7 +47,7 @@ module cve2_vec_unit #(
   output logic [4:0]   scalar_waddr_o,
   output logic [31:0]  scalar_wdata_o,
 
-  // Memory interface (direct, shared with scalar LSU via top-level mux)
+  // Memory interface
   output logic         data_req_o,
   input  logic         data_gnt_i,
   output logic [31:0]  data_addr_o,
@@ -64,35 +68,31 @@ module cve2_vec_unit #(
   input  logic         ex_valid_i
 );
 
-  localparam int unsigned LANES  = VLEN / SEW; // 8 when VLEN=256 and SEW=32
-  localparam int unsigned REG_AW = $clog2(NUM_REGS);
+  localparam int unsigned LANES   = VLEN / SEW;
+  localparam int unsigned REG_AW  = $clog2(NUM_REGS);
+  localparam int unsigned ELEM_AW = (LANES > 1) ? $clog2(LANES) : 1;
 
   // Latched request
   logic        req_valid_q;
   logic [31:0] instr_q;
   logic [31:0] rs1_q, rs2_q;
-  logic [VLEN-1:0]  acc_next;
 
   // Instruction fields
-  wire [6:0] opcode = instr_q[6:0];
   wire [4:0] rd     = instr_q[11:7];
-  wire [2:0] funct3 = instr_q[14:12];
   wire [4:0] rs1    = instr_q[19:15];
   wire [4:0] rs2    = instr_q[24:20];
   wire       vm     = instr_q[25];
-  wire [5:0] funct6 = instr_q[31:26];
   wire [4:0] imm5   = instr_q[19:15];
 
-  // vmem fields (LOAD-FP/STORE-FP)
+  // vmem fields
   wire [1:0] mop = instr_q[27:26];
   wire       mew = instr_q[28];
   wire [2:0] nf  = instr_q[31:29];
 
-  // Vector reg indices (minimal)
   wire [4:0] vd  = rd;
   wire [4:0] vs1 = rs1;
   wire [4:0] vs2 = rs2;
-  wire [4:0] vs3 = rd; // store data is in rd field for STORE-FP encodings
+  wire [4:0] vs3 = rd;
 
   function automatic logic vreg_idx_valid(input logic [4:0] idx);
     begin
@@ -103,58 +103,32 @@ module cve2_vec_unit #(
   // ----------------------
   // Vector register file
   // ----------------------
-  logic [VLEN-1:0] v_mask;
-  logic [SEW-1:0]  v_r1_elem, v_r2_elem;
-  logic [REG_AW-1:0] raddr0, raddr1, raddr2;
-  logic [$clog2(LANES)-1:0] rlane1, rlane2;
-  logic              v_we;
-  logic [REG_AW-1:0] v_waddr;
-  logic [VLEN-1:0]   v_wdata;
+  logic                 mask_bit_vrf;
+  logic [SEW-1:0]       v_rdata_elem;
+  logic [REG_AW-1:0]    raddr1;
+  logic [ELEM_AW-1:0]   relem0, relem1;
+  logic                 v_we;
+  logic [REG_AW-1:0]    v_waddr;
+  logic [ELEM_AW-1:0]   v_welem;
+  logic [SEW-1:0]       v_wdata;
 
   cve2_vec_regfile #(
     .VLEN(VLEN),
-    .SEW (SEW),
+    .SEW(SEW),
     .NUM_REGS(NUM_REGS)
   ) i_vrf (
-    .clk_i        (clk_i),
-    .rst_ni       (rst_ni),
-    .raddr0_i     (raddr0),
-    .rdata0_o     (v_mask),
-    .raddr1_i     (raddr1),
-    .rlane1_i     (rlane1),
-    .rdata1_elem_o(v_r1_elem),
-    .raddr2_i     (raddr2),
-    .rlane2_i     (rlane2),
-    .rdata2_elem_o(v_r2_elem),
-    .we_i         (v_we),
-    .waddr_i      (v_waddr),
-    .wdata_i      (v_wdata)
+    .clk_i    (clk_i),
+    .rst_ni   (rst_ni),
+    .relem0_i (relem0),
+    .mask_bit_o(mask_bit_vrf),
+    .raddr1_i (raddr1),
+    .relem1_i (relem1),
+    .rdata1_o (v_rdata_elem),
+    .we_i     (v_we),
+    .waddr_i  (v_waddr),
+    .welem_i  (v_welem),
+    .wdata_i  (v_wdata)
   );
-
-  // v0 mask: packed bits, use bit i for element i
-  function automatic logic mask_bit(input int unsigned idx);
-    mask_bit = v_mask[idx];
-  endfunction
-
-  // ----------------------
-  // Helpers: element access
-  // ----------------------
-  function automatic logic [31:0] get_elem32(input logic [VLEN-1:0] vec, input int unsigned idx);
-    get_elem32 = vec[idx*32 +: 32];
-  endfunction
-
-  function automatic logic [VLEN-1:0] set_elem32(
-    input logic [VLEN-1:0] vec,
-    input int unsigned idx,
-    input logic [31:0] val
-  );
-    logic [VLEN-1:0] tmp;
-    begin
-      tmp = vec;
-      tmp[idx*32 +: 32] = val;
-      return tmp;
-    end
-  endfunction
 
   // unit-stride only
   function automatic logic is_unit_stride;
@@ -180,36 +154,27 @@ module cve2_vec_unit #(
 
   vop_e vop_q, vop_d;
 
-function automatic logic instr_vregs_valid(input vop_e op, input logic [31:0] instr);
-  logic [4:0] rd_i, rs1_i, rs2_i;
-  begin
-    rd_i  = instr[11:7];
-    rs1_i = instr[19:15];
-    rs2_i = instr[24:20];
+  function automatic logic instr_vregs_valid(input vop_e op, input logic [31:0] instr);
+    logic [4:0] rd_i, rs1_i, rs2_i;
+    begin
+      rd_i  = instr[11:7];
+      rs1_i = instr[19:15];
+      rs2_i = instr[24:20];
 
-    unique case (op)
-      VOP_VLE32:    instr_vregs_valid = vreg_idx_valid(rd_i);
-      VOP_VSE32:    instr_vregs_valid = vreg_idx_valid(rd_i); // store data is in rd/vs3 field
-      VOP_VADD_VV:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
-                                         vreg_idx_valid(rs1_i) &&
-                                         vreg_idx_valid(rs2_i);
-      VOP_VADD_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
-                                         vreg_idx_valid(rs2_i);
-      VOP_VMUL_VV:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
-                                         vreg_idx_valid(rs1_i) &&
-                                         vreg_idx_valid(rs2_i);
-      VOP_VMUL_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
-                                         vreg_idx_valid(rs2_i);
-      VOP_VAND_VX:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
-                                         vreg_idx_valid(rs2_i);
-      VOP_VAND_VI:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
-                                         vreg_idx_valid(rs2_i);
-      VOP_VSRL_VI:  instr_vregs_valid = vreg_idx_valid(rd_i)  &&
-                                         vreg_idx_valid(rs2_i);
-      default:      instr_vregs_valid = 1'b1;
-    endcase
-  end
-endfunction
+      unique case (op)
+        VOP_VLE32:    instr_vregs_valid = vreg_idx_valid(rd_i);
+        VOP_VSE32:    instr_vregs_valid = vreg_idx_valid(rd_i);
+        VOP_VADD_VV:  instr_vregs_valid = vreg_idx_valid(rd_i) && vreg_idx_valid(rs1_i) && vreg_idx_valid(rs2_i);
+        VOP_VADD_VX:  instr_vregs_valid = vreg_idx_valid(rd_i) && vreg_idx_valid(rs2_i);
+        VOP_VMUL_VV:  instr_vregs_valid = vreg_idx_valid(rd_i) && vreg_idx_valid(rs1_i) && vreg_idx_valid(rs2_i);
+        VOP_VMUL_VX:  instr_vregs_valid = vreg_idx_valid(rd_i) && vreg_idx_valid(rs2_i);
+        VOP_VAND_VX:  instr_vregs_valid = vreg_idx_valid(rd_i) && vreg_idx_valid(rs2_i);
+        VOP_VAND_VI:  instr_vregs_valid = vreg_idx_valid(rd_i) && vreg_idx_valid(rs2_i);
+        VOP_VSRL_VI:  instr_vregs_valid = vreg_idx_valid(rd_i) && vreg_idx_valid(rs2_i);
+        default:      instr_vregs_valid = 1'b1;
+      endcase
+    end
+  endfunction
 
   localparam logic [6:0] OPC_OPV     = 7'h57;
   localparam logic [6:0] OPC_LOADFP  = 7'h07;
@@ -219,18 +184,12 @@ endfunction
   localparam logic [2:0] F3_OPIVV = 3'b000;
   localparam logic [2:0] F3_OPIVI = 3'b011;
   localparam logic [2:0] F3_OPIVX = 3'b100;
-  localparam logic [2:0] F3_W32   = 3'b110;
+  localparam logic [2:0] F3_VMEM  = 3'b110;
 
-  // Funct6 values from RVV 1.0
   localparam logic [5:0] F6_VADD = 6'b000000;
   localparam logic [5:0] F6_VMUL = 6'b100101;
   localparam logic [5:0] F6_VAND = 6'b001001;
   localparam logic [5:0] F6_VSRL = 6'b101000;
-
-  // Minimal EX op encoding for cve2_core mapping
-  localparam logic [1:0] EXOP_ADD = 2'd0;
-  localparam logic [1:0] EXOP_AND = 2'd1;
-  localparam logic [1:0] EXOP_SRL = 2'd2;
 
   function automatic vop_e decode_vop(input logic [31:0] instr);
     logic [6:0] op;
@@ -241,22 +200,24 @@ endfunction
       f3 = instr[14:12];
       f6 = instr[31:26];
 
-      if (op == OPC_OPV && f3 == F3_VSET) return VOP_VSET;
-
-      if (op == OPC_LOADFP && f3 == F3_W32) return VOP_VLE32;
-      if (op == OPC_STOREFP && f3 == F3_W32) return VOP_VSE32;
-
-      if (op == OPC_OPV && f3 == F3_OPIVV && f6 == F6_VADD) return VOP_VADD_VV;
-      if (op == OPC_OPV && f3 == F3_OPIVX && f6 == F6_VADD) return VOP_VADD_VX;
-      if (op == OPC_OPV && f3 == F3_OPIVV && f6 == F6_VMUL) return VOP_VMUL_VV;
-      if (op == OPC_OPV && f3 == F3_OPIVX && f6 == F6_VMUL) return VOP_VMUL_VX;
-      if (op == OPC_OPV && f3 == F3_OPIVX && f6 == F6_VAND) return VOP_VAND_VX;
-      if (op == OPC_OPV && f3 == F3_OPIVI && f6 == F6_VAND) return VOP_VAND_VI;
-      if (op == OPC_OPV && f3 == F3_OPIVI && f6 == F6_VSRL) return VOP_VSRL_VI;
-
+      if ((op == OPC_OPV) && (f3 == F3_VSET))   return VOP_VSET;
+      if ((op == OPC_LOADFP)  && (f3 == F3_VMEM)) return VOP_VLE32;
+      if ((op == OPC_STOREFP) && (f3 == F3_VMEM)) return VOP_VSE32;
+      if ((op == OPC_OPV) && (f3 == F3_OPIVV) && (f6 == F6_VADD)) return VOP_VADD_VV;
+      if ((op == OPC_OPV) && (f3 == F3_OPIVX) && (f6 == F6_VADD)) return VOP_VADD_VX;
+      if ((op == OPC_OPV) && (f3 == F3_OPIVV) && (f6 == F6_VMUL)) return VOP_VMUL_VV;
+      if ((op == OPC_OPV) && (f3 == F3_OPIVX) && (f6 == F6_VMUL)) return VOP_VMUL_VX;
+      if ((op == OPC_OPV) && (f3 == F3_OPIVX) && (f6 == F6_VAND)) return VOP_VAND_VX;
+      if ((op == OPC_OPV) && (f3 == F3_OPIVI) && (f6 == F6_VAND)) return VOP_VAND_VI;
+      if ((op == OPC_OPV) && (f3 == F3_OPIVI) && (f6 == F6_VSRL)) return VOP_VSRL_VI;
       return VOP_NONE;
     end
   endfunction
+
+  // Scalar EX operator encoding exported by vec unit.
+  localparam logic [1:0] EXOP_ADD = 2'd0;
+  localparam logic [1:0] EXOP_AND = 2'd1;
+  localparam logic [1:0] EXOP_SRL = 2'd2;
 
   // vtype constraints (RVV): only accept SEW=32, LMUL=1, TA=1
   function automatic logic vtype_supported(input logic [10:0] vtypei);
@@ -280,54 +241,78 @@ endfunction
     end
   endfunction
 
-  // ----------------------
-  // State
-  // ----------------------
   typedef enum logic [2:0] {
     S_IDLE,
-    S_ALU,
+    S_ALU_RD_A,
+    S_ALU_RD_B,
     S_EX_WAIT,
     S_MEM_REQ,
     S_MEM_WAIT
   } state_e;
 
+  typedef enum logic [1:0] {
+    SRC_NONE,
+    SRC_VS1,
+    SRC_VS2,
+    SRC_VS3
+  } read_src_e;
+
   state_e state_q, state_d;
 
-  logic [$clog2(LANES+1)-1:0] vl_q, vl_d;            // 0..LANES
-  logic [$clog2(LANES+1)-1:0] idx_q, idx_d;          // element index / next-to-issue
+  logic [$clog2(LANES+1)-1:0] vl_q, vl_d;
+  logic [$clog2(LANES+1)-1:0] idx_q, idx_d;
   logic [31:0]                mem_addr_q, mem_addr_d;
-  logic [VLEN-1:0]            acc_q, acc_d;          // dest accumulator
   logic                       do_elem;
   logic [31:0]                vset_avl;
   logic [10:0]                vset_vtypei;
   logic [31:0]                ex_op_a, ex_op_b;
-  logic [31:0] ex_hold_a_q, ex_hold_a_d;
-  logic [31:0] ex_hold_b_q, ex_hold_b_d;
-  logic        ex_hold_is_mul_q, ex_hold_is_mul_d;
-  logic [1:0]  ex_hold_alu_op_q, ex_hold_alu_op_d;
-  logic        done_d;
-  logic                       ex_pipe_valid_q, ex_pipe_valid_d;
-  logic [$clog2(LANES+1)-1:0] ex_pipe_idx_q, ex_pipe_idx_d;
-  logic [VLEN-1:0]            acc_work;
-  logic                       have_free_slot;
-  logic                       all_issued;
-  logic                       commit_masked;
+  logic [31:0]                ex_hold_a_q, ex_hold_a_d;
+  logic [31:0]                ex_hold_b_q, ex_hold_b_d;
+  logic                       ex_hold_is_mul_q, ex_hold_is_mul_d;
+  logic [1:0]                 ex_hold_alu_op_q, ex_hold_alu_op_d;
+  logic [ELEM_AW-1:0]         ex_hold_idx_q, ex_hold_idx_d;
+  logic [REG_AW-1:0]          ex_hold_vd_q, ex_hold_vd_d;
+  logic                       ex_hold_do_q, ex_hold_do_d;
+  logic [31:0]                src_a_hold_q, src_a_hold_d;
+  logic                       cur_valid;
+  logic [31:0]                cur_result;
+  logic [ELEM_AW-1:0]         read_idx;
+  read_src_e                  read_src;
+  logic                       done_d;
+  logic [ELEM_AW-1:0]         next_idx_e;
+  logic                       more_after_commit;
 
-  // handshake to ID
+  function automatic logic op_needs_two_vec_reads(input vop_e op);
+    begin
+      op_needs_two_vec_reads = (op == VOP_VADD_VV) || (op == VOP_VMUL_VV);
+    end
+  endfunction
+
+  function automatic logic op_uses_single_vec_read(input vop_e op);
+    begin
+      op_uses_single_vec_read = (op == VOP_VADD_VX) || (op == VOP_VMUL_VX) ||
+                                (op == VOP_VAND_VX) || (op == VOP_VAND_VI) ||
+                                (op == VOP_VSRL_VI);
+    end
+  endfunction
+
   assign req_ready_o = ~req_valid_q;
   assign busy_o      = req_valid_q;
   assign done_o      = done_d;
 
-  // Vector regfile read addresses
-  assign raddr0 = '0;  // v0 mask
-  assign raddr1 = (vop_q == VOP_VSE32) ? vs3[REG_AW-1:0] : vs1[REG_AW-1:0];
-  assign raddr2 = vs2[REG_AW-1:0];
-  assign rlane1 = idx_q[$clog2(LANES)-1:0];
-  assign rlane2 = idx_q[$clog2(LANES)-1:0];
+  always_comb begin
+    // Dedicated mask index always follows current lane.
+    relem0 = idx_q[ELEM_AW-1:0];
 
-  // ----------------------
-  // Sequential
-  // ----------------------
+    unique case (read_src)
+      SRC_VS1: raddr1 = vs1[REG_AW-1:0];
+      SRC_VS2: raddr1 = vs2[REG_AW-1:0];
+      SRC_VS3: raddr1 = vs3[REG_AW-1:0];
+      default: raddr1 = '0;
+    endcase
+    relem1 = read_idx;
+  end
+
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       req_valid_q <= 1'b0;
@@ -335,33 +320,33 @@ endfunction
       rs1_q       <= 32'd0;
       rs2_q       <= 32'd0;
       vop_q       <= VOP_NONE;
-
       state_q     <= S_IDLE;
       vl_q        <= LANES[$clog2(LANES+1)-1:0];
       idx_q       <= '0;
       mem_addr_q  <= 32'd0;
-      acc_q       <= '0;
       ex_hold_a_q      <= 32'd0;
       ex_hold_b_q      <= 32'd0;
       ex_hold_is_mul_q <= 1'b0;
       ex_hold_alu_op_q <= EXOP_ADD;
-      ex_pipe_valid_q  <= 1'b0;
-      ex_pipe_idx_q    <= '0;
+      ex_hold_idx_q    <= '0;
+      ex_hold_vd_q     <= '0;
+      ex_hold_do_q     <= 1'b0;
+      src_a_hold_q     <= 32'd0;
     end else begin
       state_q    <= state_d;
       vl_q       <= vl_d;
       idx_q      <= idx_d;
       mem_addr_q <= mem_addr_d;
-      acc_q      <= acc_d;
       vop_q      <= vop_d;
       ex_hold_a_q      <= ex_hold_a_d;
       ex_hold_b_q      <= ex_hold_b_d;
       ex_hold_is_mul_q <= ex_hold_is_mul_d;
       ex_hold_alu_op_q <= ex_hold_alu_op_d;
-      ex_pipe_valid_q  <= ex_pipe_valid_d;
-      ex_pipe_idx_q    <= ex_pipe_idx_d;
+      ex_hold_idx_q    <= ex_hold_idx_d;
+      ex_hold_vd_q     <= ex_hold_vd_d;
+      ex_hold_do_q     <= ex_hold_do_d;
+      src_a_hold_q     <= src_a_hold_d;
 
-      // accept new request
       if (req_valid_i && req_ready_o) begin
         req_valid_q <= 1'b1;
         instr_q     <= req_instr_i;
@@ -375,11 +360,7 @@ endfunction
     end
   end
 
-  // ----------------------
-  // Combinational outputs + next state
-  // ----------------------
   always_comb begin
-    // defaults
     scalar_we_o    = 1'b0;
     scalar_waddr_o = 5'd0;
     scalar_wdata_o = 32'd0;
@@ -392,30 +373,25 @@ endfunction
 
     v_we           = 1'b0;
     v_waddr        = '0;
+    v_welem        = '0;
     v_wdata        = '0;
 
     ex_hold_a_d      = ex_hold_a_q;
     ex_hold_b_d      = ex_hold_b_q;
     ex_hold_is_mul_d = ex_hold_is_mul_q;
     ex_hold_alu_op_d = ex_hold_alu_op_q;
-    ex_pipe_valid_d  = ex_pipe_valid_q;
-    ex_pipe_idx_d    = ex_pipe_idx_q;
+    ex_hold_idx_d    = ex_hold_idx_q;
+    ex_hold_vd_d     = ex_hold_vd_q;
+    ex_hold_do_d     = ex_hold_do_q;
+    src_a_hold_d     = src_a_hold_q;
 
-    acc_next       = acc_q;
-    acc_work       = acc_q;
-    have_free_slot = 1'b0;
-    all_issued     = 1'b0;
-    commit_masked  = 1'b0;
-
-    // next-state defaults
     state_d    = state_q;
     vl_d       = vl_q;
     idx_d      = idx_q;
     mem_addr_d = mem_addr_q;
-    acc_d      = acc_q;
     vop_d      = vop_q;
     done_d     = 1'b0;
-    do_elem    = vm ? 1'b1 : mask_bit(int'(idx_q));
+    do_elem    = vm ? 1'b1 : mask_bit_vrf;
     vset_avl    = 32'd0;
     vset_vtypei = 11'd0;
     ex_req_o       = 1'b0;
@@ -425,81 +401,60 @@ endfunction
     ex_operand_b_o = 32'd0;
     ex_op_a        = 32'd0;
     ex_op_b        = 32'd0;
+    cur_valid      = 1'b0;
+    cur_result     = 32'd0;
+    read_idx       = idx_q[ELEM_AW-1:0];
+    read_src       = SRC_NONE;
+    next_idx_e     = idx_q[ELEM_AW-1:0] + 1'b1;
+    more_after_commit = (idx_q != (vl_q - 1'b1));
 
-    // when we just accepted a new request, initialize locals and choose the
-    // real first state directly.
     if (req_valid_i && req_ready_o) begin
-      vop_d           = decode_vop(req_instr_i);
-      idx_d           = '0;
-      mem_addr_d      = req_rs1_i;
-      acc_d           = '0;
-      ex_pipe_valid_d = 1'b0;
-      ex_pipe_idx_d   = '0;
+      vop_d      = decode_vop(req_instr_i);
+      idx_d      = '0;
+      mem_addr_d = req_rs1_i;
+      src_a_hold_d = 32'd0;
 
       if (!instr_vregs_valid(decode_vop(req_instr_i), req_instr_i)) begin
-        // Prevent silent aliasing when NUM_REGS < 32.
-        // Treat out-of-range vector register references as a no-op completion.
-        state_d = S_ALU;
+        state_d = S_ALU_RD_A;
         vop_d   = VOP_NONE;
       end else begin
         unique case (decode_vop(req_instr_i))
           VOP_VLE32,
           VOP_VSE32: state_d = S_MEM_REQ;
-
-          VOP_VSET,
-          VOP_VADD_VV,
-          VOP_VADD_VX,
-          VOP_VMUL_VV,
-          VOP_VMUL_VX,
-          VOP_VAND_VX,
-          VOP_VAND_VI,
-          VOP_VSRL_VI,
-          VOP_NONE: state_d = S_ALU;
-
-          default: state_d = S_ALU;
+          default:   state_d = S_ALU_RD_A;
         endcase
       end
     end
 
     unique case (state_q)
       S_IDLE: begin
-        // stay idle; accept block above chooses next state for new requests
       end
 
-      S_ALU: begin
+      S_ALU_RD_A: begin
         if ((vop_q != VOP_VSET) && (vl_q == '0)) begin
           done_d  = 1'b1;
           state_d = S_IDLE;
         end else begin
           unique case (vop_q)
             VOP_VSET: begin
-              // minimal vset semantics:
-              // - accept only fixed SEW/LMUL, TA=1 (for vsetvli)
-              // - compute vl = min(AVL, LANES)
-              // default: vsetvli (AVL in rs1)
               vset_avl    = rs1_q;
               vset_vtypei = instr_q[30:20];
 
               if (instr_q[31]) begin
-                // vsetivli: AVL is uimm[4:0], vtypei is bits[29:20]
                 vset_avl    = {27'd0, instr_q[19:15]};
                 vset_vtypei = {1'b0, instr_q[29:20]};
               end else if (instr_q[25] && (instr_q[31:26] == 6'b000000)) begin
-                // vsetvl: use rs2 as AVL
                 vset_avl    = rs2_q;
                 vset_vtypei = 11'h000;
               end
 
-              // vsetvli checks vtype
               if (!instr_q[31] && !(instr_q[25] && (instr_q[31:26] == 6'b000000))) begin
                 if (!vtype_supported(vset_vtypei)) begin
-                  // Treat as no-op; decoder should have trapped it as illegal.
                   vl_d = vl_q;
                 end else begin
                   vl_d = compute_vl(vset_avl);
                 end
               end else begin
-                // vsetivli/vsetvl: fixed semantics
                 vl_d = compute_vl(vset_avl);
               end
 
@@ -510,102 +465,49 @@ endfunction
               state_d        = S_IDLE;
             end
 
-            // Bubble-free pipeline for ALU-style reused EX ops.
-            // ex_valid_i/ex_result_i now come from a registered boundary in cve2_core.sv,
-            // so consuming them here is safe and does not create a combinational loop.
             VOP_VADD_VV,
+            VOP_VMUL_VV: begin
+              // First of the two required vector reads: capture vs2 lane.
+              read_src     = SRC_VS2;
+              read_idx     = idx_q[ELEM_AW-1:0];
+              src_a_hold_d = v_rdata_elem;
+              state_d      = S_ALU_RD_B;
+            end
+
             VOP_VADD_VX,
+            VOP_VMUL_VX,
             VOP_VAND_VX,
             VOP_VAND_VI,
             VOP_VSRL_VI: begin
-              acc_work       = acc_q;
-              have_free_slot = !ex_pipe_valid_q;
-              all_issued     = (idx_q == vl_q);
-
-              // Commit previously launched element if its registered EX result is ready.
-              if (ex_pipe_valid_q && ex_valid_i) begin
-                commit_masked = vm ? 1'b1 : mask_bit(int'(ex_pipe_idx_q));
-
-                if (commit_masked) begin
-                  acc_work = set_elem32(acc_work, int'(ex_pipe_idx_q), ex_result_i);
-                end
-
-                ex_pipe_valid_d = 1'b0;
-                have_free_slot  = 1'b1;
-              end
-
-              acc_d = acc_work;
-
-              // Launch next element in the same cycle that the previous one commits.
-              if (have_free_slot && !all_issued) begin
-                ex_op_a = v_r2_elem; // vs2
-
-                unique case (vop_q)
-                  VOP_VADD_VV: begin
-                    ex_op_b     = v_r1_elem; // vs1
-                    ex_alu_op_o = EXOP_ADD;
-                  end
-                  VOP_VADD_VX: begin
-                    ex_op_b     = rs1_q;
-                    ex_alu_op_o = EXOP_ADD;
-                  end
-                  VOP_VAND_VX: begin
-                    ex_op_b     = rs1_q;
-                    ex_alu_op_o = EXOP_AND;
-                  end
-                  VOP_VAND_VI: begin
-                    ex_op_b     = {27'd0, imm5};
-                    ex_alu_op_o = EXOP_AND;
-                  end
-                  VOP_VSRL_VI: begin
-                    ex_op_b     = {27'd0, imm5};
-                    ex_alu_op_o = EXOP_SRL;
-                  end
-                  default: begin
-                    ex_op_b     = 32'd0;
-                    ex_alu_op_o = EXOP_ADD;
-                  end
-                endcase
-
-                ex_req_o       = 1'b1;
-                ex_operand_a_o = ex_op_a;
-                ex_operand_b_o = ex_op_b;
-                ex_is_mul_o    = 1'b0;
-
-                ex_pipe_valid_d = 1'b1;
-                ex_pipe_idx_d   = idx_q;
-                idx_d           = idx_q + 1'b1;
-              end
-
-              // Finish only after the last launched element has actually committed.
-              if ((idx_q == vl_q) && !ex_pipe_valid_d) begin
-                v_we    = 1'b1;
-                v_waddr = vd[REG_AW-1:0];
-                v_wdata = acc_work;
-                done_d  = 1'b1;
-                state_d = S_IDLE;
-              end else begin
-                state_d = S_ALU;
-              end
-            end
-
-            // Keep multiply conservative and safe for generic RV32M behavior.
-            VOP_VMUL_VV,
-            VOP_VMUL_VX: begin
-              ex_op_a = v_r2_elem; // vs2
+              // Single vector read path: read vs2 and immediately issue reused EX op.
+              read_src = SRC_VS2;
+              read_idx = idx_q[ELEM_AW-1:0];
+              ex_op_a  = v_rdata_elem;
 
               unique case (vop_q)
-                VOP_VMUL_VV: begin
-                  ex_op_b     = v_r1_elem; // vs1
-                  ex_is_mul_o = 1'b1;
+                VOP_VADD_VX: begin
+                  ex_op_b     = rs1_q;
+                  ex_alu_op_o = EXOP_ADD;
                 end
                 VOP_VMUL_VX: begin
                   ex_op_b     = rs1_q;
                   ex_is_mul_o = 1'b1;
                 end
+                VOP_VAND_VX: begin
+                  ex_op_b     = rs1_q;
+                  ex_alu_op_o = EXOP_AND;
+                end
+                VOP_VAND_VI: begin
+                  ex_op_b     = {27'd0, imm5};
+                  ex_alu_op_o = EXOP_AND;
+                end
+                VOP_VSRL_VI: begin
+                  ex_op_b     = {27'd0, imm5};
+                  ex_alu_op_o = EXOP_SRL;
+                end
                 default: begin
                   ex_op_b     = 32'd0;
-                  ex_is_mul_o = 1'b1;
+                  ex_alu_op_o = EXOP_ADD;
                 end
               endcase
 
@@ -615,10 +517,12 @@ endfunction
 
               ex_hold_a_d      = ex_op_a;
               ex_hold_b_d      = ex_op_b;
-              ex_hold_is_mul_d = 1'b1;
-              ex_hold_alu_op_d = EXOP_ADD;
-
-              state_d = S_EX_WAIT;
+              ex_hold_is_mul_d = (vop_q == VOP_VMUL_VX);
+              ex_hold_alu_op_d = ex_alu_op_o;
+              ex_hold_idx_d    = idx_q[ELEM_AW-1:0];
+              ex_hold_vd_d     = vd[REG_AW-1:0];
+              ex_hold_do_d     = do_elem;
+              state_d          = S_EX_WAIT;
             end
 
             VOP_VLE32,
@@ -634,35 +538,133 @@ endfunction
         end
       end
 
+      S_ALU_RD_B: begin
+        // Second vector read for vv ops: read vs1 and issue reused EX op.
+        read_src = SRC_VS1;
+        read_idx = idx_q[ELEM_AW-1:0];
+        ex_op_a  = src_a_hold_q;
+        ex_op_b  = v_rdata_elem;
+
+        unique case (vop_q)
+          VOP_VADD_VV: begin
+            ex_alu_op_o = EXOP_ADD;
+            ex_is_mul_o = 1'b0;
+          end
+          VOP_VMUL_VV: begin
+            ex_alu_op_o = EXOP_ADD;
+            ex_is_mul_o = 1'b1;
+          end
+          default: begin
+            ex_alu_op_o = EXOP_ADD;
+            ex_is_mul_o = 1'b0;
+          end
+        endcase
+
+        ex_req_o       = 1'b1;
+        ex_operand_a_o = ex_op_a;
+        ex_operand_b_o = ex_op_b;
+
+        ex_hold_a_d      = ex_op_a;
+        ex_hold_b_d      = ex_op_b;
+        ex_hold_is_mul_d = (vop_q == VOP_VMUL_VV);
+        ex_hold_alu_op_d = ex_alu_op_o;
+        ex_hold_idx_d    = idx_q[ELEM_AW-1:0];
+        ex_hold_vd_d     = vd[REG_AW-1:0];
+        ex_hold_do_d     = do_elem;
+        state_d          = S_EX_WAIT;
+      end
+
       S_EX_WAIT: begin
         if (vl_q == '0) begin
           done_d  = 1'b1;
           state_d = S_IDLE;
         end else begin
+          cur_valid  = ex_valid_i;
+          cur_result = ex_result_i;
+
+          // Keep current issued op visible on the reused EX interface.
           ex_req_o       = 1'b1;
           ex_operand_a_o = ex_hold_a_q;
           ex_operand_b_o = ex_hold_b_q;
           ex_is_mul_o    = ex_hold_is_mul_q;
           ex_alu_op_o    = ex_hold_alu_op_q;
 
-          if (ex_valid_i) begin
-            if (do_elem) begin
-              acc_next = set_elem32(acc_q, int'(idx_q), ex_result_i);
-            end else begin
-              acc_next = acc_q;
+          if (cur_valid) begin
+            if (ex_hold_do_q) begin
+              v_we    = 1'b1;
+              v_waddr = ex_hold_vd_q;
+              v_welem = ex_hold_idx_q;
+              v_wdata = cur_result;
             end
 
-            acc_d = acc_next;
-
-            if (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1)) begin
-              v_we    = 1'b1;
-              v_waddr = vd[REG_AW-1:0];
-              v_wdata = acc_next;
+            if (!more_after_commit) begin
               done_d  = 1'b1;
               state_d = S_IDLE;
             end else begin
-              idx_d   = idx_q + 1'b1;
-              state_d = S_ALU;
+              idx_d = idx_q + 1'b1;
+
+              if (op_uses_single_vec_read(vop_q)) begin
+                // Best case with 1R1W: while committing lane i, also read and
+                // launch lane i+1 (vx/vi paths need only one vector read).
+                read_src = SRC_VS2;
+                read_idx = next_idx_e;
+                ex_op_a  = v_rdata_elem;
+
+                unique case (vop_q)
+                  VOP_VADD_VX: begin
+                    ex_op_b     = rs1_q;
+                    ex_alu_op_o = EXOP_ADD;
+                    ex_is_mul_o = 1'b0;
+                  end
+                  VOP_VMUL_VX: begin
+                    ex_op_b     = rs1_q;
+                    ex_alu_op_o = EXOP_ADD;
+                    ex_is_mul_o = 1'b1;
+                  end
+                  VOP_VAND_VX: begin
+                    ex_op_b     = rs1_q;
+                    ex_alu_op_o = EXOP_AND;
+                    ex_is_mul_o = 1'b0;
+                  end
+                  VOP_VAND_VI: begin
+                    ex_op_b     = {27'd0, imm5};
+                    ex_alu_op_o = EXOP_AND;
+                    ex_is_mul_o = 1'b0;
+                  end
+                  VOP_VSRL_VI: begin
+                    ex_op_b     = {27'd0, imm5};
+                    ex_alu_op_o = EXOP_SRL;
+                    ex_is_mul_o = 1'b0;
+                  end
+                  default: begin
+                    ex_op_b     = 32'd0;
+                    ex_alu_op_o = EXOP_ADD;
+                    ex_is_mul_o = 1'b0;
+                  end
+                endcase
+
+                ex_req_o       = 1'b1;
+                ex_operand_a_o = ex_op_a;
+                ex_operand_b_o = ex_op_b;
+
+                ex_hold_a_d      = ex_op_a;
+                ex_hold_b_d      = ex_op_b;
+                ex_hold_is_mul_d = (vop_q == VOP_VMUL_VX);
+                ex_hold_alu_op_d = ex_alu_op_o;
+                ex_hold_idx_d    = next_idx_e;
+                ex_hold_vd_d     = vd[REG_AW-1:0];
+                ex_hold_do_d     = vm ? 1'b1 : mask_bit_vrf;
+                state_d          = S_EX_WAIT;
+              end else if (op_needs_two_vec_reads(vop_q)) begin
+                // For vv ops, use the same cycle to capture the first source of
+                // lane i+1, then the next cycle reads the second source and issues.
+                read_src     = SRC_VS2;
+                read_idx     = next_idx_e;
+                src_a_hold_d = v_rdata_elem;
+                state_d      = S_ALU_RD_B;
+              end else begin
+                state_d = S_ALU_RD_A;
+              end
             end
           end
         end
@@ -673,7 +675,6 @@ endfunction
           done_d  = 1'b1;
           state_d = S_IDLE;
         end else if (!is_unit_stride()) begin
-          // unsupported addressing => should be illegal; treat as done
           done_d  = 1'b1;
           state_d = S_IDLE;
         end else begin
@@ -685,8 +686,10 @@ endfunction
             data_we_o    = 1'b0;
             data_wdata_o = 32'd0;
           end else begin
-            data_we_o    = 1'b1;
-            data_wdata_o = v_r1_elem; // v_r1 is vs3 for store
+            read_src      = SRC_VS3;
+            read_idx      = idx_q[ELEM_AW-1:0];
+            data_we_o     = 1'b1;
+            data_wdata_o  = v_rdata_elem;
           end
 
           if (data_gnt_i) begin
@@ -701,28 +704,19 @@ endfunction
           state_d = S_IDLE;
         end else if (data_rvalid_i) begin
           if (data_err_i) begin
-            // Minimal: stop. (Scalar core may choose to observe bus error elsewhere.)
             done_d  = 1'b1;
             state_d = S_IDLE;
           end else begin
-            acc_next = acc_q;
-
-            if (vop_q == VOP_VLE32) begin
-              if (do_elem) begin
-                acc_next = set_elem32(acc_q, int'(idx_q), data_rdata_i);
-              end
-              acc_d = acc_next;
+            if (vop_q == VOP_VLE32 && do_elem) begin
+              v_we    = 1'b1;
+              v_waddr = vd[REG_AW-1:0];
+              v_welem = idx_q[ELEM_AW-1:0];
+              v_wdata = data_rdata_i;
             end
 
-            // post-increment address
             mem_addr_d = mem_addr_q + 32'd4;
 
-            if (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1)) begin
-              if (vop_q == VOP_VLE32) begin
-                v_we    = 1'b1;
-                v_waddr = vd[REG_AW-1:0];
-                v_wdata = acc_next;
-              end
+            if (idx_q == (vl_q - 1'b1)) begin
               done_d  = 1'b1;
               state_d = S_IDLE;
             end else begin
@@ -738,13 +732,5 @@ endfunction
       end
     endcase
   end
-
-  // Temporary Debug Prints
-  // always_ff @(posedge clk_i) begin
-  //   if (state_q != S_IDLE || req_valid_q) begin
-  //     $display("[VEC] state=%0d idx=%0d vl=%0d ex_req=%0d ex_valid=%0d done=%0d busy=%0d instr=%h",
-  //             state_q, idx_q, vl_q, ex_req_o, ex_valid_i, done_o, busy_o, instr_q);
-  //   end
-  // end
 
 endmodule
