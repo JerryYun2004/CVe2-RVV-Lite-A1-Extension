@@ -103,27 +103,32 @@ module cve2_vec_unit #(
   // ----------------------
   // Vector register file
   // ----------------------
-  logic [VLEN-1:0] v_mask, v_r1, v_r2;
+  logic [VLEN-1:0] v_mask;
+  logic [SEW-1:0]  v_r1_elem, v_r2_elem;
   logic [REG_AW-1:0] raddr0, raddr1, raddr2;
+  logic [$clog2(LANES)-1:0] rlane1, rlane2;
   logic              v_we;
   logic [REG_AW-1:0] v_waddr;
   logic [VLEN-1:0]   v_wdata;
 
   cve2_vec_regfile #(
     .VLEN(VLEN),
+    .SEW (SEW),
     .NUM_REGS(NUM_REGS)
   ) i_vrf (
-    .clk_i   (clk_i),
-    .rst_ni  (rst_ni),
-    .raddr0_i(raddr0),
-    .rdata0_o(v_mask),
-    .raddr1_i(raddr1),
-    .rdata1_o(v_r1),
-    .raddr2_i(raddr2),
-    .rdata2_o(v_r2),
-    .we_i    (v_we),
-    .waddr_i (v_waddr),
-    .wdata_i (v_wdata)
+    .clk_i        (clk_i),
+    .rst_ni       (rst_ni),
+    .raddr0_i     (raddr0),
+    .rdata0_o     (v_mask),
+    .raddr1_i     (raddr1),
+    .rlane1_i     (rlane1),
+    .rdata1_elem_o(v_r1_elem),
+    .raddr2_i     (raddr2),
+    .rlane2_i     (rlane2),
+    .rdata2_elem_o(v_r2_elem),
+    .we_i         (v_we),
+    .waddr_i      (v_waddr),
+    .wdata_i      (v_wdata)
   );
 
   // v0 mask: packed bits, use bit i for element i
@@ -314,11 +319,11 @@ endfunction
   assign done_o      = done_d;
 
   // Vector regfile read addresses
-  // Keep these outside the main always_comb so the block that consumes
-  // v_mask/v_r1/v_r2 does not also drive raddr0/1/2.
   assign raddr0 = '0;  // v0 mask
   assign raddr1 = (vop_q == VOP_VSE32) ? vs3[REG_AW-1:0] : vs1[REG_AW-1:0];
   assign raddr2 = vs2[REG_AW-1:0];
+  assign rlane1 = idx_q[$clog2(LANES)-1:0];
+  assign rlane2 = idx_q[$clog2(LANES)-1:0];
 
   // ----------------------
   // Sequential
@@ -461,7 +466,7 @@ endfunction
         // stay idle; accept block above chooses next state for new requests
       end
 
-         S_ALU: begin
+      S_ALU: begin
         if ((vop_q != VOP_VSET) && (vl_q == '0)) begin
           done_d  = 1'b1;
           state_d = S_IDLE;
@@ -533,11 +538,11 @@ endfunction
 
               // Launch next element in the same cycle that the previous one commits.
               if (have_free_slot && !all_issued) begin
-                ex_op_a = get_elem32(v_r2, int'(idx_q)); // vs2
+                ex_op_a = v_r2_elem; // vs2
 
                 unique case (vop_q)
                   VOP_VADD_VV: begin
-                    ex_op_b     = get_elem32(v_r1, int'(idx_q)); // vs1
+                    ex_op_b     = v_r1_elem; // vs1
                     ex_alu_op_o = EXOP_ADD;
                   end
                   VOP_VADD_VX: begin
@@ -587,11 +592,11 @@ endfunction
             // Keep multiply conservative and safe for generic RV32M behavior.
             VOP_VMUL_VV,
             VOP_VMUL_VX: begin
-              ex_op_a = get_elem32(v_r2, int'(idx_q)); // vs2
+              ex_op_a = v_r2_elem; // vs2
 
               unique case (vop_q)
                 VOP_VMUL_VV: begin
-                  ex_op_b     = get_elem32(v_r1, int'(idx_q)); // vs1
+                  ex_op_b     = v_r1_elem; // vs1
                   ex_is_mul_o = 1'b1;
                 end
                 VOP_VMUL_VX: begin
@@ -681,7 +686,7 @@ endfunction
             data_wdata_o = 32'd0;
           end else begin
             data_we_o    = 1'b1;
-            data_wdata_o = get_elem32(v_r1, int'(idx_q)); // v_r1 is vs3 for store
+            data_wdata_o = v_r1_elem; // v_r1 is vs3 for store
           end
 
           if (data_gnt_i) begin
