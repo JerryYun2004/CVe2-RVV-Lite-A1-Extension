@@ -4,12 +4,12 @@
 // Minimal vector register file for RVV-Lite A.1 on CVE2.
 // Separate from scalar RF.
 //
-// 1R1W LUTRAM-oriented version:
-// - one distributed-RAM storage array
-// - synchronous writes
-// - one asynchronous 32-bit read port for vector data
-// - tiny separate mask shadow for v0 bit access so masked execution does not
-//   consume the only data-read port
+// 2R1W LUTRAM-oriented version:
+// - duplicated distributed-RAM storage arrays
+// - synchronous writes broadcast to both copies
+// - two asynchronous 32-bit read ports for vector data
+// - tiny separate v0 mask shadow with two bit-read taps so masked execution
+//   does not consume either data-read port
 // - element-level (32-bit) interface to avoid carrying 256-bit buses
 
 module cve2_vec_regfile #(
@@ -20,14 +20,19 @@ module cve2_vec_regfile #(
   input  logic                         clk_i,
   input  logic                         rst_ni,
 
-  // Dedicated mask read from v0 shadow.
+  // Dedicated mask reads from v0 shadow.
   input  logic [$clog2(VLEN/SEW)-1:0]  relem0_i,
   output logic                         mask_bit_o,
+  input  logic [$clog2(VLEN/SEW)-1:0]  relem0b_i,
+  output logic                         mask_bit_b_o,
 
-  // Single vector data read port.
+  // Two vector data read ports.
   input  logic [$clog2(NUM_REGS)-1:0]  raddr1_i,
   input  logic [$clog2(VLEN/SEW)-1:0]  relem1_i,
   output logic [SEW-1:0]               rdata1_o,
+  input  logic [$clog2(NUM_REGS)-1:0]  raddr2_i,
+  input  logic [$clog2(VLEN/SEW)-1:0]  relem2_i,
+  output logic [SEW-1:0]               rdata2_o,
 
   // Write port (synchronous), one 32-bit element at a time.
   input  logic                         we_i,
@@ -42,25 +47,35 @@ module cve2_vec_regfile #(
   localparam int unsigned DEPTH   = NUM_REGS * LANES;
   localparam int unsigned ADDR_W  = REG_AW + ELEM_AW;
 
-  // Flat 1-D memory array so Vivado can infer distributed RAM more reliably.
-  (* ram_style = "distributed" *) logic [SEW-1:0] mem [0:DEPTH-1];
+  // Duplicate storage to obtain two independent read ports with one logical write port.
+  (* ram_style = "distributed" *) logic [SEW-1:0] mem_a [0:DEPTH-1];
+  (* ram_style = "distributed" *) logic [SEW-1:0] mem_b [0:DEPTH-1];
 
-  // Tiny v0 mask shadow. This avoids consuming the only data-read port just to
-  // fetch one mask bit. Keep it write-through coherent on v0 writes.
+  // Tiny v0 mask shadow. This avoids consuming a data-read port just to fetch one mask bit.
   logic [LANES-1:0] v0_mask_q;
 
   logic [ADDR_W-1:0] raddr1_flat;
+  logic [ADDR_W-1:0] raddr2_flat;
   logic [ADDR_W-1:0] waddr_flat;
 
   assign raddr1_flat = {raddr1_i, relem1_i};
+  assign raddr2_flat = {raddr2_i, relem2_i};
   assign waddr_flat  = {waddr_i,  welem_i};
 
-  // Asynchronous data read with same-cycle read/write bypass.
+  // Asynchronous data reads with same-cycle read/write bypass.
   always_comb begin
     if (we_i && (waddr_i == raddr1_i) && (welem_i == relem1_i)) begin
       rdata1_o = wdata_i;
     end else begin
-      rdata1_o = mem[raddr1_flat];
+      rdata1_o = mem_a[raddr1_flat];
+    end
+  end
+
+  always_comb begin
+    if (we_i && (waddr_i == raddr2_i) && (welem_i == relem2_i)) begin
+      rdata2_o = wdata_i;
+    end else begin
+      rdata2_o = mem_b[raddr2_flat];
     end
   end
 
@@ -72,17 +87,24 @@ module cve2_vec_regfile #(
     end
   end
 
+  always_comb begin
+    if (we_i && (waddr_i == '0) && (welem_i == relem0b_i)) begin
+      mask_bit_b_o = wdata_i[0];
+    end else begin
+      mask_bit_b_o = v0_mask_q[relem0b_i];
+    end
+  end
+
   // Synchronous element write.
-  // Do not clear the memory array on reset.
+  // Do not clear the memory arrays on reset.
   always_ff @(posedge clk_i) begin
     if (!rst_ni) begin
       v0_mask_q <= '0;
-    end else begin
-      if (we_i) begin
-        mem[waddr_flat] <= wdata_i;
-        if (waddr_i == '0) begin
-          v0_mask_q[welem_i] <= wdata_i[0];
-        end
+    end else if (we_i) begin
+      mem_a[waddr_flat] <= wdata_i;
+      mem_b[waddr_flat] <= wdata_i;
+      if (waddr_i == '0) begin
+        v0_mask_q[welem_i] <= wdata_i[0];
       end
     end
   end

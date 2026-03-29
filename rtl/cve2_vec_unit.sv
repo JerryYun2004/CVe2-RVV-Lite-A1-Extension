@@ -13,8 +13,8 @@
 // - Safe/simple uarch.
 // - Internal hardware loop counter (element index) and post-increment address counter for vmem ops.
 // - Strict reuse of original CVE2 scalar EX hardware for vector ALU/multiply ops.
-// - 1R1W VRF support: vv ops serialize the two vector source reads, while vx/vi
-//   ops keep one-lane-per-cycle issue/retire after pipeline fill.
+// - 2R1W VRF support via duplicated LUTRAM: vv ops can read both vector sources
+//   in the same cycle, while vx/vi ops keep one-lane-per-cycle issue/retire after pipeline fill.
 //
 // Supported instruction subset:
 // - vsetvli / vsetivli / vsetvl  (fixed to SEW=32, LMUL=1, TA=1)
@@ -103,10 +103,10 @@ module cve2_vec_unit #(
   // ----------------------
   // Vector register file
   // ----------------------
-  logic                 mask_bit_vrf;
-  logic [SEW-1:0]       v_rdata_elem;
-  logic [REG_AW-1:0]    raddr1;
-  logic [ELEM_AW-1:0]   relem0, relem1;
+  logic                 mask_bit_vrf_cur, mask_bit_vrf_next;
+  logic [SEW-1:0]       v_rdata_elem1, v_rdata_elem2;
+  logic [REG_AW-1:0]    raddr1, raddr2;
+  logic [ELEM_AW-1:0]   relem0_cur, relem0_next, relem1, relem2;
   logic                 v_we;
   logic [REG_AW-1:0]    v_waddr;
   logic [ELEM_AW-1:0]   v_welem;
@@ -119,12 +119,17 @@ module cve2_vec_unit #(
   ) i_vrf (
     .clk_i    (clk_i),
     .rst_ni   (rst_ni),
-    .relem0_i (relem0),
-    .mask_bit_o(mask_bit_vrf),
-    .raddr1_i (raddr1),
-    .relem1_i (relem1),
-    .rdata1_o (v_rdata_elem),
-    .we_i     (v_we),
+    .relem0_i   (relem0_cur),
+    .mask_bit_o (mask_bit_vrf_cur),
+    .relem0b_i  (relem0_next),
+    .mask_bit_b_o(mask_bit_vrf_next),
+    .raddr1_i   (raddr1),
+    .relem1_i   (relem1),
+    .rdata1_o   (v_rdata_elem1),
+    .raddr2_i   (raddr2),
+    .relem2_i   (relem2),
+    .rdata2_o   (v_rdata_elem2),
+    .we_i       (v_we),
     .waddr_i  (v_waddr),
     .welem_i  (v_welem),
     .wdata_i  (v_wdata)
@@ -243,19 +248,16 @@ module cve2_vec_unit #(
 
   typedef enum logic [2:0] {
     S_IDLE,
-    S_ALU_RD_A,
-    S_ALU_RD_B,
+    S_ALU_ISSUE,
     S_EX_WAIT,
     S_MEM_REQ,
     S_MEM_WAIT
   } state_e;
 
-  typedef enum logic [1:0] {
-    SRC_NONE,
-    SRC_VS1,
-    SRC_VS2,
-    SRC_VS3
-  } read_src_e;
+  localparam logic [1:0] RSEL_NONE = 2'd0;
+  localparam logic [1:0] RSEL_VS1  = 2'd1;
+  localparam logic [1:0] RSEL_VS2  = 2'd2;
+  localparam logic [1:0] RSEL_VS3  = 2'd3;
 
   state_e state_q, state_d;
 
@@ -273,20 +275,13 @@ module cve2_vec_unit #(
   logic [ELEM_AW-1:0]         ex_hold_idx_q, ex_hold_idx_d;
   logic [REG_AW-1:0]          ex_hold_vd_q, ex_hold_vd_d;
   logic                       ex_hold_do_q, ex_hold_do_d;
-  logic [31:0]                src_a_hold_q, src_a_hold_d;
   logic                       cur_valid;
   logic [31:0]                cur_result;
-  logic [ELEM_AW-1:0]         read_idx;
-  read_src_e                  read_src;
+  logic [ELEM_AW-1:0]         read_idx1, read_idx2;
+  logic [1:0]                 raddr1_sel, raddr2_sel;
   logic                       done_d;
   logic [ELEM_AW-1:0]         next_idx_e;
   logic                       more_after_commit;
-
-  function automatic logic op_needs_two_vec_reads(input vop_e op);
-    begin
-      op_needs_two_vec_reads = (op == VOP_VADD_VV) || (op == VOP_VMUL_VV);
-    end
-  endfunction
 
   function automatic logic op_uses_single_vec_read(input vop_e op);
     begin
@@ -301,16 +296,25 @@ module cve2_vec_unit #(
   assign done_o      = done_d;
 
   always_comb begin
-    // Dedicated mask index always follows current lane.
-    relem0 = idx_q[ELEM_AW-1:0];
+    relem0_cur  = idx_q[ELEM_AW-1:0];
+    relem0_next = idx_q[ELEM_AW-1:0] + 1'b1;
 
-    unique case (read_src)
-      SRC_VS1: raddr1 = vs1[REG_AW-1:0];
-      SRC_VS2: raddr1 = vs2[REG_AW-1:0];
-      SRC_VS3: raddr1 = vs3[REG_AW-1:0];
-      default: raddr1 = '0;
+    unique case (raddr1_sel)
+      RSEL_VS1: raddr1 = vs1[REG_AW-1:0];
+      RSEL_VS2: raddr1 = vs2[REG_AW-1:0];
+      RSEL_VS3: raddr1 = vs3[REG_AW-1:0];
+      default:  raddr1 = '0;
     endcase
-    relem1 = read_idx;
+
+    unique case (raddr2_sel)
+      RSEL_VS1: raddr2 = vs1[REG_AW-1:0];
+      RSEL_VS2: raddr2 = vs2[REG_AW-1:0];
+      RSEL_VS3: raddr2 = vs3[REG_AW-1:0];
+      default:  raddr2 = '0;
+    endcase
+
+    relem1 = read_idx1;
+    relem2 = read_idx2;
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -331,7 +335,6 @@ module cve2_vec_unit #(
       ex_hold_idx_q    <= '0;
       ex_hold_vd_q     <= '0;
       ex_hold_do_q     <= 1'b0;
-      src_a_hold_q     <= 32'd0;
     end else begin
       state_q    <= state_d;
       vl_q       <= vl_d;
@@ -345,7 +348,6 @@ module cve2_vec_unit #(
       ex_hold_idx_q    <= ex_hold_idx_d;
       ex_hold_vd_q     <= ex_hold_vd_d;
       ex_hold_do_q     <= ex_hold_do_d;
-      src_a_hold_q     <= src_a_hold_d;
 
       if (req_valid_i && req_ready_o) begin
         req_valid_q <= 1'b1;
@@ -383,7 +385,6 @@ module cve2_vec_unit #(
     ex_hold_idx_d    = ex_hold_idx_q;
     ex_hold_vd_d     = ex_hold_vd_q;
     ex_hold_do_d     = ex_hold_do_q;
-    src_a_hold_d     = src_a_hold_q;
 
     state_d    = state_q;
     vl_d       = vl_q;
@@ -391,7 +392,7 @@ module cve2_vec_unit #(
     mem_addr_d = mem_addr_q;
     vop_d      = vop_q;
     done_d     = 1'b0;
-    do_elem    = vm ? 1'b1 : mask_bit_vrf;
+    do_elem    = vm ? 1'b1 : mask_bit_vrf_cur;
     vset_avl    = 32'd0;
     vset_vtypei = 11'd0;
     ex_req_o       = 1'b0;
@@ -403,8 +404,10 @@ module cve2_vec_unit #(
     ex_op_b        = 32'd0;
     cur_valid      = 1'b0;
     cur_result     = 32'd0;
-    read_idx       = idx_q[ELEM_AW-1:0];
-    read_src       = SRC_NONE;
+    read_idx1      = idx_q[ELEM_AW-1:0];
+    read_idx2      = idx_q[ELEM_AW-1:0];
+    raddr1_sel     = RSEL_NONE;
+    raddr2_sel     = RSEL_NONE;
     next_idx_e     = idx_q[ELEM_AW-1:0] + 1'b1;
     more_after_commit = (idx_q != (vl_q - 1'b1));
 
@@ -412,16 +415,15 @@ module cve2_vec_unit #(
       vop_d      = decode_vop(req_instr_i);
       idx_d      = '0;
       mem_addr_d = req_rs1_i;
-      src_a_hold_d = 32'd0;
 
       if (!instr_vregs_valid(decode_vop(req_instr_i), req_instr_i)) begin
-        state_d = S_ALU_RD_A;
+        state_d = S_ALU_ISSUE;
         vop_d   = VOP_NONE;
       end else begin
         unique case (decode_vop(req_instr_i))
           VOP_VLE32,
           VOP_VSE32: state_d = S_MEM_REQ;
-          default:   state_d = S_ALU_RD_A;
+          default:   state_d = S_ALU_ISSUE;
         endcase
       end
     end
@@ -430,7 +432,7 @@ module cve2_vec_unit #(
       S_IDLE: begin
       end
 
-      S_ALU_RD_A: begin
+      S_ALU_ISSUE: begin
         if ((vop_q != VOP_VSET) && (vl_q == '0)) begin
           done_d  = 1'b1;
           state_d = S_IDLE;
@@ -467,11 +469,27 @@ module cve2_vec_unit #(
 
             VOP_VADD_VV,
             VOP_VMUL_VV: begin
-              // First of the two required vector reads: capture vs2 lane.
-              read_src     = SRC_VS2;
-              read_idx     = idx_q[ELEM_AW-1:0];
-              src_a_hold_d = v_rdata_elem;
-              state_d      = S_ALU_RD_B;
+              raddr1_sel = RSEL_VS2;
+              raddr2_sel = RSEL_VS1;
+              read_idx1  = idx_q[ELEM_AW-1:0];
+              read_idx2  = idx_q[ELEM_AW-1:0];
+              ex_op_a    = v_rdata_elem1;
+              ex_op_b    = v_rdata_elem2;
+
+              ex_alu_op_o = EXOP_ADD;
+              ex_is_mul_o = (vop_q == VOP_VMUL_VV);
+              ex_req_o       = 1'b1;
+              ex_operand_a_o = ex_op_a;
+              ex_operand_b_o = ex_op_b;
+
+              ex_hold_a_d      = ex_op_a;
+              ex_hold_b_d      = ex_op_b;
+              ex_hold_is_mul_d = (vop_q == VOP_VMUL_VV);
+              ex_hold_alu_op_d = ex_alu_op_o;
+              ex_hold_idx_d    = idx_q[ELEM_AW-1:0];
+              ex_hold_vd_d     = vd[REG_AW-1:0];
+              ex_hold_do_d     = do_elem;
+              state_d          = S_EX_WAIT;
             end
 
             VOP_VADD_VX,
@@ -479,10 +497,9 @@ module cve2_vec_unit #(
             VOP_VAND_VX,
             VOP_VAND_VI,
             VOP_VSRL_VI: begin
-              // Single vector read path: read vs2 and immediately issue reused EX op.
-              read_src = SRC_VS2;
-              read_idx = idx_q[ELEM_AW-1:0];
-              ex_op_a  = v_rdata_elem;
+              raddr1_sel = RSEL_VS2;
+              read_idx1  = idx_q[ELEM_AW-1:0];
+              ex_op_a    = v_rdata_elem1;
 
               unique case (vop_q)
                 VOP_VADD_VX: begin
@@ -538,42 +555,6 @@ module cve2_vec_unit #(
         end
       end
 
-      S_ALU_RD_B: begin
-        // Second vector read for vv ops: read vs1 and issue reused EX op.
-        read_src = SRC_VS1;
-        read_idx = idx_q[ELEM_AW-1:0];
-        ex_op_a  = src_a_hold_q;
-        ex_op_b  = v_rdata_elem;
-
-        unique case (vop_q)
-          VOP_VADD_VV: begin
-            ex_alu_op_o = EXOP_ADD;
-            ex_is_mul_o = 1'b0;
-          end
-          VOP_VMUL_VV: begin
-            ex_alu_op_o = EXOP_ADD;
-            ex_is_mul_o = 1'b1;
-          end
-          default: begin
-            ex_alu_op_o = EXOP_ADD;
-            ex_is_mul_o = 1'b0;
-          end
-        endcase
-
-        ex_req_o       = 1'b1;
-        ex_operand_a_o = ex_op_a;
-        ex_operand_b_o = ex_op_b;
-
-        ex_hold_a_d      = ex_op_a;
-        ex_hold_b_d      = ex_op_b;
-        ex_hold_is_mul_d = (vop_q == VOP_VMUL_VV);
-        ex_hold_alu_op_d = ex_alu_op_o;
-        ex_hold_idx_d    = idx_q[ELEM_AW-1:0];
-        ex_hold_vd_d     = vd[REG_AW-1:0];
-        ex_hold_do_d     = do_elem;
-        state_d          = S_EX_WAIT;
-      end
-
       S_EX_WAIT: begin
         if (vl_q == '0) begin
           done_d  = 1'b1;
@@ -604,11 +585,11 @@ module cve2_vec_unit #(
               idx_d = idx_q + 1'b1;
 
               if (op_uses_single_vec_read(vop_q)) begin
-                // Best case with 1R1W: while committing lane i, also read and
-                // launch lane i+1 (vx/vi paths need only one vector read).
-                read_src = SRC_VS2;
-                read_idx = next_idx_e;
-                ex_op_a  = v_rdata_elem;
+                // While committing lane i, also read and launch lane i+1.
+                // vx/vi paths still need only one vector read even with the 2R1W VRF.
+                raddr1_sel = RSEL_VS2;
+                read_idx1 = next_idx_e;
+                ex_op_a  = v_rdata_elem1;
 
                 unique case (vop_q)
                   VOP_VADD_VX: begin
@@ -653,17 +634,33 @@ module cve2_vec_unit #(
                 ex_hold_alu_op_d = ex_alu_op_o;
                 ex_hold_idx_d    = next_idx_e;
                 ex_hold_vd_d     = vd[REG_AW-1:0];
-                ex_hold_do_d     = vm ? 1'b1 : mask_bit_vrf;
+                ex_hold_do_d     = vm ? 1'b1 : mask_bit_vrf_next;
                 state_d          = S_EX_WAIT;
-              end else if (op_needs_two_vec_reads(vop_q)) begin
-                // For vv ops, use the same cycle to capture the first source of
-                // lane i+1, then the next cycle reads the second source and issues.
-                read_src     = SRC_VS2;
-                read_idx     = next_idx_e;
-                src_a_hold_d = v_rdata_elem;
-                state_d      = S_ALU_RD_B;
+              end else if ((vop_q == VOP_VADD_VV) || (vop_q == VOP_VMUL_VV)) begin
+                // With 2R1W VRF support, commit lane i and launch lane i+1 in the same cycle.
+                raddr1_sel = RSEL_VS2;
+                raddr2_sel = RSEL_VS1;
+                read_idx1  = next_idx_e;
+                read_idx2  = next_idx_e;
+                ex_op_a    = v_rdata_elem1;
+                ex_op_b    = v_rdata_elem2;
+                ex_alu_op_o = EXOP_ADD;
+                ex_is_mul_o = (vop_q == VOP_VMUL_VV);
+
+                ex_req_o       = 1'b1;
+                ex_operand_a_o = ex_op_a;
+                ex_operand_b_o = ex_op_b;
+
+                ex_hold_a_d      = ex_op_a;
+                ex_hold_b_d      = ex_op_b;
+                ex_hold_is_mul_d = (vop_q == VOP_VMUL_VV);
+                ex_hold_alu_op_d = ex_alu_op_o;
+                ex_hold_idx_d    = next_idx_e;
+                ex_hold_vd_d     = vd[REG_AW-1:0];
+                ex_hold_do_d     = vm ? 1'b1 : mask_bit_vrf_next;
+                state_d          = S_EX_WAIT;
               end else begin
-                state_d = S_ALU_RD_A;
+                state_d = S_ALU_ISSUE;
               end
             end
           end
@@ -686,10 +683,10 @@ module cve2_vec_unit #(
             data_we_o    = 1'b0;
             data_wdata_o = 32'd0;
           end else begin
-            read_src      = SRC_VS3;
-            read_idx      = idx_q[ELEM_AW-1:0];
+            raddr1_sel    = RSEL_VS3;
+            read_idx1     = idx_q[ELEM_AW-1:0];
             data_we_o     = 1'b1;
-            data_wdata_o  = v_rdata_elem;
+            data_wdata_o  = v_rdata_elem1;
           end
 
           if (data_gnt_i) begin
