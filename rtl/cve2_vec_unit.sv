@@ -28,7 +28,7 @@
 module cve2_vec_unit #(
   parameter int unsigned VLEN     = 256,
   parameter int unsigned SEW      = 32,
-  parameter int unsigned NUM_REGS = 8
+  parameter int unsigned NUM_REGS = 32
 ) (
   input  logic         clk_i,
   input  logic         rst_ni,
