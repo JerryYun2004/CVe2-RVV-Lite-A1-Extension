@@ -36,21 +36,31 @@ module cve2_vec_regfile #(
   input  logic [SEW-1:0]               wdata_i
 );
 
-  localparam int unsigned LANES = VLEN / SEW;
+  localparam int unsigned LANES   = VLEN / SEW;
+  localparam int unsigned REG_AW  = (NUM_REGS > 1) ? $clog2(NUM_REGS) : 1;
+  localparam int unsigned ELEM_AW = (LANES    > 1) ? $clog2(LANES)    : 1;
+  localparam int unsigned DEPTH   = NUM_REGS * LANES;
+  localparam int unsigned ADDR_W  = REG_AW + ELEM_AW;
 
-  // One LUTRAM-backed storage array.
-  (* ram_style = "distributed" *) logic [SEW-1:0] mem [0:NUM_REGS-1][0:LANES-1];
+  // Flat 1-D memory array so Vivado can infer distributed RAM more reliably.
+  (* ram_style = "distributed" *) logic [SEW-1:0] mem [0:DEPTH-1];
 
   // Tiny v0 mask shadow. This avoids consuming the only data-read port just to
   // fetch one mask bit. Keep it write-through coherent on v0 writes.
   logic [LANES-1:0] v0_mask_q;
+
+  logic [ADDR_W-1:0] raddr1_flat;
+  logic [ADDR_W-1:0] waddr_flat;
+
+  assign raddr1_flat = {raddr1_i, relem1_i};
+  assign waddr_flat  = {waddr_i,  welem_i};
 
   // Asynchronous data read with same-cycle read/write bypass.
   always_comb begin
     if (we_i && (waddr_i == raddr1_i) && (welem_i == relem1_i)) begin
       rdata1_o = wdata_i;
     end else begin
-      rdata1_o = mem[raddr1_i][relem1_i];
+      rdata1_o = mem[raddr1_flat];
     end
   end
 
@@ -64,13 +74,12 @@ module cve2_vec_regfile #(
 
   // Synchronous element write.
   // Do not clear the memory array on reset.
-  integer i;
   always_ff @(posedge clk_i) begin
     if (!rst_ni) begin
       v0_mask_q <= '0;
     end else begin
       if (we_i) begin
-        mem[waddr_i][welem_i] <= wdata_i;
+        mem[waddr_flat] <= wdata_i;
         if (waddr_i == '0) begin
           v0_mask_q[welem_i] <= wdata_i[0];
         end
