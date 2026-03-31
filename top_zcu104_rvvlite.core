@@ -1,0 +1,32 @@
+CAPI=2:
+name: "user:cve2:top_zcu104_rvvlite:1.0"
+description: "Minimal ZCU104 synthesis top for CVE2 RVV-Lite"
+
+filesets:
+  files_rtl:
+    depend:
+      - openhwgroup:cve2:cve2_top:0.1
+    files:
+      - examples/top_zcu104_rvvlite.sv
+    file_type: systemVerilogSource
+
+  files_xdc:
+    files:
+      - constraints/top_zcu104_rvvlite.xdc
+    file_type: xdc
+
+targets:
+  default:
+    filesets:
+      - files_rtl
+    toplevel: top_zcu104_rvvlite
+
+  synth:
+    default_tool: vivado
+    filesets:
+      - files_rtl
+      - files_xdc
+    toplevel: top_zcu104_rvvlite
+    tools:
+      vivado:
+        part: xczu7ev-ffvc1156-2-e
