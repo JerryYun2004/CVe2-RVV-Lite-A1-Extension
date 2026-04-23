@@ -190,3 +190,4 @@ module cve2_ex_block #(
   assign ex_valid_o = multdiv_sel ? multdiv_valid : ~(|alu_imd_val_we);
 
 endmodule
+
