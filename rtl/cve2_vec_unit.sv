@@ -274,27 +274,41 @@ module cve2_vec_unit #(
   logic [31:0]                mem_addr_q, mem_addr_d;
   logic                       done_d;
 
-  logic [31:0]                ex_op_a, ex_op_b;
-  logic [31:0]                ex_hold_a_q, ex_hold_a_d;
-  logic [31:0]                ex_hold_b_q, ex_hold_b_d;
-  logic                       ex_hold_is_mul_q, ex_hold_is_mul_d;
-  logic [1:0]                 ex_hold_alu_op_q, ex_hold_alu_op_d;
+  // Registered vector -> scalar EX micro-op pipeline.
+  // This is the timing cut that removes the same-cycle path:
+  // vec_unit operand/control select -> core EX mux -> scalar ALU -> vec_unit writeback.
+  logic                       ex_pipe_valid_q, ex_pipe_valid_d;
+  logic                       ex_pipe_is_mul_q, ex_pipe_is_mul_d;
+  logic [1:0]                 ex_pipe_alu_op_q, ex_pipe_alu_op_d;
+  logic [31:0]                ex_pipe_operand_a_q, ex_pipe_operand_a_d;
+  logic [31:0]                ex_pipe_operand_b_q, ex_pipe_operand_b_d;
+  logic [ELEM_AW-1:0]         ex_pipe_idx_q, ex_pipe_idx_d;
 
   logic                       do_elem;
   logic [31:0]                vset_avl;
   logic [10:0]                vset_vtypei;
 
   logic                       last_elem;
+  logic                       ex_pipe_last_elem;
   logic [ELEM_AW-1:0]         vrf_elem_idx;
 
   assign req_ready_o = ~req_valid_q;
   assign busy_o      = req_valid_q;
   assign done_o      = done_d;
 
-  assign last_elem = (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1));
+  assign last_elem         = (idx_q == (vl_q[$bits(idx_q)-1:0] - 1'b1));
+  assign ex_pipe_last_elem = (ex_pipe_idx_q == (vl_q[$bits(ex_pipe_idx_q)-1:0] - 1'b1));
 
-  // Decide which element index the VRF should read next.
-  // This overlaps the read of i+1 while consuming/completing i.
+  // Registered EX request output. The scalar EX block only sees registered vector operands/control.
+  assign ex_req_o       = ex_pipe_valid_q;
+  assign ex_is_mul_o    = ex_pipe_is_mul_q;
+  assign ex_alu_op_o    = ex_pipe_alu_op_q;
+  assign ex_operand_a_o = ex_pipe_operand_a_q;
+  assign ex_operand_b_o = ex_pipe_operand_b_q;
+
+  // Decide which element index the synchronous VRF should read next.
+  // idx_q is the next element to issue for arithmetic ops. The outstanding element index is
+  // separately stored in ex_pipe_idx_q.
   always_comb begin
     vrf_elem_idx = idx_q;
 
@@ -306,15 +320,16 @@ module cve2_vec_unit #(
             (vop_q == VOP_VAND_VX) ||
             (vop_q == VOP_VAND_VI) ||
             (vop_q == VOP_VSRL_VI)) begin
-          if (((!do_elem) || ex_valid_i) && !last_elem) begin
+          if (!last_elem) begin
             vrf_elem_idx = idx_q + 1'b1;
           end
         end
       end
 
-      // Important: also prefetch on the completion cycle of EX_WAIT.
+      // While the previous EX micro-op is retiring, prefetch the element after idx_q.
+      // This preserves one-element-per-cycle steady-state for single-cycle ALU ops.
       S_EX_WAIT: begin
-        if (ex_valid_i && !last_elem) begin
+        if (ex_valid_i && !ex_pipe_last_elem && !last_elem) begin
           vrf_elem_idx = idx_q + 1'b1;
         end
       end
@@ -375,32 +390,36 @@ module cve2_vec_unit #(
   // ----------------------
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      req_valid_q       <= 1'b0;
-      instr_q           <= 32'd0;
-      rs1_q             <= 32'd0;
-      rs2_q             <= 32'd0;
-      vop_q             <= VOP_NONE;
+      req_valid_q         <= 1'b0;
+      instr_q             <= 32'd0;
+      rs1_q               <= 32'd0;
+      rs2_q               <= 32'd0;
+      vop_q               <= VOP_NONE;
 
-      state_q           <= S_IDLE;
-      vl_q              <= LANES[$clog2(LANES+1)-1:0];
-      idx_q             <= '0;
-      mem_addr_q        <= 32'd0;
+      state_q             <= S_IDLE;
+      vl_q                <= LANES[$clog2(LANES+1)-1:0];
+      idx_q               <= '0;
+      mem_addr_q          <= 32'd0;
 
-      ex_hold_a_q       <= 32'd0;
-      ex_hold_b_q       <= 32'd0;
-      ex_hold_is_mul_q  <= 1'b0;
-      ex_hold_alu_op_q  <= EXOP_ADD;
+      ex_pipe_valid_q     <= 1'b0;
+      ex_pipe_is_mul_q    <= 1'b0;
+      ex_pipe_alu_op_q    <= EXOP_ADD;
+      ex_pipe_operand_a_q <= 32'd0;
+      ex_pipe_operand_b_q <= 32'd0;
+      ex_pipe_idx_q       <= '0;
     end else begin
-      state_q           <= state_d;
-      vl_q              <= vl_d;
-      idx_q             <= idx_d;
-      mem_addr_q        <= mem_addr_d;
-      vop_q             <= vop_d;
+      state_q             <= state_d;
+      vl_q                <= vl_d;
+      idx_q               <= idx_d;
+      mem_addr_q          <= mem_addr_d;
+      vop_q               <= vop_d;
 
-      ex_hold_a_q       <= ex_hold_a_d;
-      ex_hold_b_q       <= ex_hold_b_d;
-      ex_hold_is_mul_q  <= ex_hold_is_mul_d;
-      ex_hold_alu_op_q  <= ex_hold_alu_op_d;
+      ex_pipe_valid_q     <= ex_pipe_valid_d;
+      ex_pipe_is_mul_q    <= ex_pipe_is_mul_d;
+      ex_pipe_alu_op_q    <= ex_pipe_alu_op_d;
+      ex_pipe_operand_a_q <= ex_pipe_operand_a_d;
+      ex_pipe_operand_b_q <= ex_pipe_operand_b_d;
+      ex_pipe_idx_q       <= ex_pipe_idx_d;
 
       if (req_valid_i && req_ready_o) begin
         req_valid_q <= 1'b1;
@@ -434,16 +453,12 @@ module cve2_vec_unit #(
     v_welem        = '0;
     v_wdata        = '0;
 
-    ex_req_o       = 1'b0;
-    ex_is_mul_o    = 1'b0;
-    ex_alu_op_o    = EXOP_ADD;
-    ex_operand_a_o = 32'd0;
-    ex_operand_b_o = 32'd0;
-
-    ex_hold_a_d      = ex_hold_a_q;
-    ex_hold_b_d      = ex_hold_b_q;
-    ex_hold_is_mul_d = ex_hold_is_mul_q;
-    ex_hold_alu_op_d = ex_hold_alu_op_q;
+    ex_pipe_valid_d     = ex_pipe_valid_q;
+    ex_pipe_is_mul_d    = ex_pipe_is_mul_q;
+    ex_pipe_alu_op_d    = ex_pipe_alu_op_q;
+    ex_pipe_operand_a_d = ex_pipe_operand_a_q;
+    ex_pipe_operand_b_d = ex_pipe_operand_b_q;
+    ex_pipe_idx_d       = ex_pipe_idx_q;
 
     state_d        = state_q;
     vl_d           = vl_q;
@@ -455,13 +470,14 @@ module cve2_vec_unit #(
     do_elem        = vm ? 1'b1 : mask_bit_a;
     vset_avl       = 32'd0;
     vset_vtypei    = 11'd0;
-    ex_op_a        = 32'd0;
-    ex_op_b        = 32'd0;
 
     if (req_valid_i && req_ready_o) begin
       vop_d      = decode_vop(req_instr_i);
       idx_d      = '0;
       mem_addr_d = req_rs1_i;
+
+      // A new architectural vector instruction starts with no outstanding EX micro-op.
+      ex_pipe_valid_d = 1'b0;
 
       if (!instr_vregs_valid(decode_vop(req_instr_i), req_instr_i)) begin
         state_d = S_ALU;
@@ -493,8 +509,9 @@ module cve2_vec_unit #(
       // One-time prime cycle for synchronous VRF
       S_VRF_READ: begin
         if (vl_q == '0) begin
-          done_d  = 1'b1;
-          state_d = S_IDLE;
+          done_d          = 1'b1;
+          state_d         = S_IDLE;
+          ex_pipe_valid_d = 1'b0;
         end else begin
           unique case (vop_q)
             VOP_VSE32: begin
@@ -519,8 +536,9 @@ module cve2_vec_unit #(
 
       S_ALU: begin
         if ((vop_q != VOP_VSET) && (vl_q == '0)) begin
-          done_d  = 1'b1;
-          state_d = S_IDLE;
+          done_d          = 1'b1;
+          state_d         = S_IDLE;
+          ex_pipe_valid_d = 1'b0;
         end else begin
           unique case (vop_q)
             VOP_VSET: begin
@@ -556,6 +574,8 @@ module cve2_vec_unit #(
             VOP_VAND_VI,
             VOP_VSRL_VI: begin
               if (!do_elem) begin
+                ex_pipe_valid_d = 1'b0;
+
                 if (last_elem) begin
                   done_d  = 1'b1;
                   state_d = S_IDLE;
@@ -564,64 +584,48 @@ module cve2_vec_unit #(
                   state_d = S_ALU;
                 end
               end else begin
-                ex_op_a = v_r2;
+                ex_pipe_valid_d     = 1'b1;
+                ex_pipe_operand_a_d = v_r2;
+                ex_pipe_idx_d       = idx_q;
+                ex_pipe_is_mul_d    = (vop_q == VOP_VMUL_VX);
+                ex_pipe_alu_op_d    = EXOP_ADD;
 
                 unique case (vop_q)
                   VOP_VADD_VV: begin
-                    ex_op_b     = v_r1;
-                    ex_alu_op_o = EXOP_ADD;
+                    ex_pipe_operand_b_d = v_r1;
+                    ex_pipe_alu_op_d    = EXOP_ADD;
                   end
                   VOP_VADD_VX: begin
-                    ex_op_b     = rs1_q;
-                    ex_alu_op_o = EXOP_ADD;
+                    ex_pipe_operand_b_d = rs1_q;
+                    ex_pipe_alu_op_d    = EXOP_ADD;
                   end
                   VOP_VMUL_VX: begin
-                    ex_op_b     = rs1_q;
-                    ex_is_mul_o = 1'b1;
+                    ex_pipe_operand_b_d = rs1_q;
                   end
                   VOP_VAND_VX: begin
-                    ex_op_b     = rs1_q;
-                    ex_alu_op_o = EXOP_AND;
+                    ex_pipe_operand_b_d = rs1_q;
+                    ex_pipe_alu_op_d    = EXOP_AND;
                   end
                   VOP_VAND_VI: begin
-                    ex_op_b     = {27'd0, imm5};
-                    ex_alu_op_o = EXOP_AND;
+                    ex_pipe_operand_b_d = {27'd0, imm5};
+                    ex_pipe_alu_op_d    = EXOP_AND;
                   end
                   VOP_VSRL_VI: begin
-                    ex_op_b     = {27'd0, imm5};
-                    ex_alu_op_o = EXOP_SRL;
+                    ex_pipe_operand_b_d = {27'd0, imm5};
+                    ex_pipe_alu_op_d    = EXOP_SRL;
                   end
                   default: begin
-                    ex_op_b     = 32'd0;
-                    ex_alu_op_o = EXOP_ADD;
+                    ex_pipe_operand_b_d = 32'd0;
+                    ex_pipe_alu_op_d    = EXOP_ADD;
                   end
                 endcase
 
-                ex_req_o       = 1'b1;
-                ex_operand_a_o = ex_op_a;
-                ex_operand_b_o = ex_op_b;
-
-                ex_hold_a_d      = ex_op_a;
-                ex_hold_b_d      = ex_op_b;
-                ex_hold_is_mul_d = (vop_q == VOP_VMUL_VX);
-                ex_hold_alu_op_d = ex_alu_op_o;
-
-                if (ex_valid_i) begin
-                  v_we    = 1'b1;
-                  v_waddr = vd[REG_AW-1:0];
-                  v_welem = idx_q;
-                  v_wdata = ex_result_i;
-
-                  if (last_elem) begin
-                    done_d  = 1'b1;
-                    state_d = S_IDLE;
-                  end else begin
-                    idx_d   = idx_q + 1'b1;
-                    state_d = S_ALU;
-                  end
-                end else begin
-                  state_d = S_EX_WAIT;
+                // idx_q tracks the next element to issue. Do not advance beyond the last
+                // representable element; the outstanding element index is in ex_pipe_idx_q.
+                if (!last_elem) begin
+                  idx_d = idx_q + 1'b1;
                 end
+                state_d = S_EX_WAIT;
               end
             end
 
@@ -631,8 +635,9 @@ module cve2_vec_unit #(
             end
 
             default: begin
-              done_d  = 1'b1;
-              state_d = S_IDLE;
+              done_d          = 1'b1;
+              state_d         = S_IDLE;
+              ex_pipe_valid_d = 1'b0;
             end
           endcase
         end
@@ -640,20 +645,23 @@ module cve2_vec_unit #(
 
       S_EX_WAIT: begin
         if (vl_q == '0) begin
-          done_d  = 1'b1;
-          state_d = S_IDLE;
-        end else begin
-          ex_req_o       = 1'b1;
-          ex_operand_a_o = ex_hold_a_q;
-          ex_operand_b_o = ex_hold_b_q;
-          ex_is_mul_o    = ex_hold_is_mul_q;
-          ex_alu_op_o    = ex_hold_alu_op_q;
+          done_d          = 1'b1;
+          state_d         = S_IDLE;
+          ex_pipe_valid_d = 1'b0;
+        end else if (ex_valid_i && ex_pipe_valid_q) begin
+          // Retire the outstanding registered EX micro-op.
+          v_we    = 1'b1;
+          v_waddr = vd[REG_AW-1:0];
+          v_welem = ex_pipe_idx_q;
+          v_wdata = ex_result_i;
 
-          if (ex_valid_i) begin
-            v_we    = 1'b1;
-            v_waddr = vd[REG_AW-1:0];
-            v_welem = idx_q;
-            v_wdata = ex_result_i;
+          if (ex_pipe_last_elem) begin
+            done_d          = 1'b1;
+            state_d         = S_IDLE;
+            ex_pipe_valid_d = 1'b0;
+          end else if (!do_elem) begin
+            // Next element is masked off. No EX issue this cycle.
+            ex_pipe_valid_d = 1'b0;
 
             if (last_elem) begin
               done_d  = 1'b1;
@@ -662,7 +670,54 @@ module cve2_vec_unit #(
               idx_d   = idx_q + 1'b1;
               state_d = S_ALU;
             end
+          end else begin
+            // Retire previous element and issue next element into the registered EX pipe.
+            // For single-cycle ALU ops this keeps one-element-per-cycle steady-state.
+            ex_pipe_valid_d     = 1'b1;
+            ex_pipe_operand_a_d = v_r2;
+            ex_pipe_idx_d       = idx_q;
+            ex_pipe_is_mul_d    = (vop_q == VOP_VMUL_VX);
+            ex_pipe_alu_op_d    = EXOP_ADD;
+
+            unique case (vop_q)
+              VOP_VADD_VV: begin
+                ex_pipe_operand_b_d = v_r1;
+                ex_pipe_alu_op_d    = EXOP_ADD;
+              end
+              VOP_VADD_VX: begin
+                ex_pipe_operand_b_d = rs1_q;
+                ex_pipe_alu_op_d    = EXOP_ADD;
+              end
+              VOP_VMUL_VX: begin
+                ex_pipe_operand_b_d = rs1_q;
+              end
+              VOP_VAND_VX: begin
+                ex_pipe_operand_b_d = rs1_q;
+                ex_pipe_alu_op_d    = EXOP_AND;
+              end
+              VOP_VAND_VI: begin
+                ex_pipe_operand_b_d = {27'd0, imm5};
+                ex_pipe_alu_op_d    = EXOP_AND;
+              end
+              VOP_VSRL_VI: begin
+                ex_pipe_operand_b_d = {27'd0, imm5};
+                ex_pipe_alu_op_d    = EXOP_SRL;
+              end
+              default: begin
+                ex_pipe_operand_b_d = 32'd0;
+                ex_pipe_alu_op_d    = EXOP_ADD;
+              end
+            endcase
+
+            if (!last_elem) begin
+              idx_d = idx_q + 1'b1;
+            end
+            state_d = S_EX_WAIT;
           end
+        end else begin
+          // Multi-cycle multiply/divide path: keep the registered EX request asserted and
+          // operands stable until scalar EX reports a valid result.
+          state_d = S_EX_WAIT;
         end
       end
 
@@ -732,7 +787,8 @@ module cve2_vec_unit #(
       end
 
       default: begin
-        state_d = S_IDLE;
+        state_d         = S_IDLE;
+        ex_pipe_valid_d = 1'b0;
       end
     endcase
   end

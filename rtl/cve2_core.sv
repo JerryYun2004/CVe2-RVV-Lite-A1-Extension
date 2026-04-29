@@ -603,7 +603,7 @@ module cve2_core import cve2_pkg::*; #(
   assign unused_illegal_insn_id = illegal_insn_id;
 
   // Reuse scalar EX hardware for vector arithmetic/multiply micro-ops.
-  wire sel_vec_ex = vec_ex_req | (vec_busy & vec_ex_is_mul);
+  wire sel_vec_ex = vec_ex_req;
 
   // // Temporary Debug Prints
   // always_ff @(posedge clk_i) begin
